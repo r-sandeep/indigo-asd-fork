@@ -25,18 +25,19 @@ import { PortalProjectPage } from '@/features/portal/PortalProjectPage'
 // ── Staff auth guard ───────────────────────────────────────────────────────
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth()
+  const { user, isLoading } = useAuth()
+  if (isLoading) return null          // session check in-flight — hold position
   if (user === null) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
 function AuthRoutes() {
   useAuthListener()
-  const { user } = useAuth()
+  const { user, isLoading } = useAuth()
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/login" element={isLoading ? null : user ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route
         element={
           <RequireAuth>

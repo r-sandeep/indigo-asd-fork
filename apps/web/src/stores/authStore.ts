@@ -8,6 +8,8 @@ interface AuthState {
   profile: UserProfile | null
   tenantMemberships: (TenantMember & { tenant: Tenant })[]
   activeTenantId: string | null
+  /** True until the first getSession() response has been processed. */
+  isLoading: boolean
 
   setAuth: (user: User | null, session: Session | null) => void
   setProfile: (profile: UserProfile | null) => void
@@ -22,8 +24,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   profile: null,
   tenantMemberships: [],
   activeTenantId: null,
+  isLoading: true,
 
-  setAuth: (user, session) => set({ user, session }),
+  setAuth: (user, session) => set({ user, session, isLoading: false }),
   setProfile: (profile) => set({ profile }),
   setTenantMemberships: (tenantMemberships) =>
     set((state) => ({
@@ -33,5 +36,5 @@ export const useAuthStore = create<AuthState>((set) => ({
     })),
   setActiveTenant: (activeTenantId) => set({ activeTenantId }),
   clearAuth: () =>
-    set({ user: null, session: null, profile: null, tenantMemberships: [], activeTenantId: null }),
+    set({ user: null, session: null, profile: null, tenantMemberships: [], activeTenantId: null, isLoading: false }),
 }))
