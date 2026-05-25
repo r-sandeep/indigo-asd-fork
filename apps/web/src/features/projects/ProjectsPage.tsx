@@ -52,7 +52,7 @@ export function ProjectsPage() {
       if (!job) return false
 
       const matchesStatus =
-        statusFilter === 'all' || job.status === statusFilter
+        statusFilter === 'all' || job.project_status === statusFilter
 
       const q = search.toLowerCase()
       const matchesSearch =
@@ -68,7 +68,7 @@ export function ProjectsPage() {
   const counts = useMemo(() => {
     if (!projects) return {}
     return projects.reduce<Record<string, number>>((acc, p) => {
-      const s = p.job?.status ?? 'unknown'
+      const s = p.job?.project_status ?? 'unknown'
       acc[s] = (acc[s] ?? 0) + 1
       return acc
     }, {})
@@ -157,7 +157,7 @@ export function ProjectsPage() {
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
               {filtered.map((project, idx) => {
                 const job = project.job!
-                const accentColor = STATUS_ACCENT[job.status] ?? '#9ca3af'
+                const accentColor = STATUS_ACCENT[job.project_status ?? ''] ?? '#9ca3af'
                 const contractCents = job.current_contract_cents ?? job.contract_value_cents
                 const location = [job.city, job.state].filter(Boolean).join(', ')
                 const targetDate = formatDate(job.target_completion)
@@ -182,7 +182,7 @@ export function ProjectsPage() {
                         <span className="truncate text-sm font-semibold text-gray-900 group-hover:text-brand-700 transition-colors">
                           {job.job_name}
                         </span>
-                        {job.job_type && <TypeBadge type={job.job_type} />}
+                        {job.project_type && <TypeBadge type={job.project_type} />}
                       </div>
                       <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">
                         <span className="font-mono text-gray-400">{job.job_number}</span>
@@ -205,7 +205,7 @@ export function ProjectsPage() {
                           {formatMoney(contractCents)}
                         </span>
                       )}
-                      <StatusBadge status={job.status} />
+                      <StatusBadge status={job.project_status ?? ''} />
                       {targetDate && (
                         <span className="w-24 text-right text-xs text-gray-400">
                           {targetDate}

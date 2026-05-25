@@ -6,8 +6,13 @@ export interface ProjectJob {
   id: string
   job_number: string
   job_name: string
+  /** BB-owned field with jobs_status_check constraint — not used for Indigo display. */
   status: string
+  /** Indigo lifecycle status — 'active' | 'bidding' | 'on_hold' | 'complete' | 'cancelled' | 'pending' */
+  project_status: string | null
   job_type: string | null
+  /** Indigo-extended field — 'custom' | 'express' | 'service' | 'warranty' | null */
+  project_type: string | null
   contract_amount_cents: number | null
   contract_value_cents: number | null
   current_contract_cents: number | null
@@ -92,7 +97,9 @@ export async function getProjects(client: SupabaseClient, tenantId: string) {
         job_number,
         job_name,
         status,
+        project_status,
         job_type,
+        project_type,
         contract_amount_cents,
         contract_value_cents,
         current_contract_cents,
@@ -132,7 +139,9 @@ export async function getProject(client: SupabaseClient, projectId: string) {
         job_number,
         job_name,
         status,
+        project_status,
         job_type,
+        project_type,
         contract_amount_cents,
         contract_value_cents,
         current_contract_cents,
