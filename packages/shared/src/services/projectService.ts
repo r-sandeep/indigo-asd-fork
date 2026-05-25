@@ -705,3 +705,164 @@ export async function createProject(
     projectId: (project as { id: string }).id,
   }
 }
+
+// ── Phase mutations ────────────────────────────────────────────────────────
+
+export interface UpsertPhaseInput {
+  id?: string
+  name: string
+  status: string
+  start_date?: string | null
+  end_date?: string | null
+  color?: string | null
+  description?: string | null
+  sequence: number
+}
+
+export async function upsertPhase(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  input: UpsertPhaseInput,
+): Promise<{ id: string }> {
+  if (input.id) {
+    const { data, error } = await client
+      .from('project_phases')
+      .update({
+        name:        input.name,
+        status:      input.status,
+        start_date:  input.start_date  ?? null,
+        end_date:    input.end_date    ?? null,
+        color:       input.color       ?? null,
+        description: input.description ?? null,
+        sequence:    input.sequence,
+      } as unknown as never)
+      .eq('id', input.id)
+      .eq('tenant_id', tenantId)
+      .select('id')
+      .single()
+    if (error) throw error
+    return data as { id: string }
+  }
+
+  const { data, error } = await client
+    .from('project_phases')
+    .insert({
+      tenant_id:   tenantId,
+      project_id:  projectId,
+      name:        input.name,
+      status:      input.status,
+      start_date:  input.start_date  ?? null,
+      end_date:    input.end_date    ?? null,
+      color:       input.color       ?? null,
+      description: input.description ?? null,
+      sequence:    input.sequence,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
+
+export async function deletePhase(
+  client: SupabaseClient,
+  phaseId: string,
+  tenantId: string,
+): Promise<void> {
+  // Delete milestones in this phase first
+  await client
+    .from('milestones')
+    .delete()
+    .eq('phase_id', phaseId)
+    .eq('tenant_id', tenantId)
+
+  const { error } = await client
+    .from('project_phases')
+    .delete()
+    .eq('id', phaseId)
+    .eq('tenant_id', tenantId)
+  if (error) throw error
+}
+
+// ── Milestone mutations ────────────────────────────────────────────────────
+
+export interface UpsertMilestoneInput {
+  id?: string
+  phase_id?: string | null
+  name: string
+  description?: string | null
+  due_date?: string | null
+  completed_date?: string | null
+  status: string
+  sequence: number
+  is_client_visible: boolean
+  requires_client_approval: boolean
+  triggers_draw_request: boolean
+  triggers_invoice: boolean
+}
+
+export async function upsertMilestone(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  input: UpsertMilestoneInput,
+): Promise<{ id: string }> {
+  if (input.id) {
+    const { data, error } = await client
+      .from('milestones')
+      .update({
+        phase_id:                input.phase_id                ?? null,
+        name:                    input.name,
+        description:             input.description             ?? null,
+        due_date:                input.due_date                ?? null,
+        completed_date:          input.completed_date          ?? null,
+        status:                  input.status,
+        sequence:                input.sequence,
+        is_client_visible:       input.is_client_visible,
+        requires_client_approval: input.requires_client_approval,
+        triggers_draw_request:   input.triggers_draw_request,
+        triggers_invoice:        input.triggers_invoice,
+      } as unknown as never)
+      .eq('id', input.id)
+      .eq('tenant_id', tenantId)
+      .select('id')
+      .single()
+    if (error) throw error
+    return data as { id: string }
+  }
+
+  const { data, error } = await client
+    .from('milestones')
+    .insert({
+      tenant_id:               tenantId,
+      project_id:              projectId,
+      phase_id:                input.phase_id                ?? null,
+      name:                    input.name,
+      description:             input.description             ?? null,
+      due_date:                input.due_date                ?? null,
+      completed_date:          input.completed_date          ?? null,
+      status:                  input.status,
+      sequence:                input.sequence,
+      is_client_visible:       input.is_client_visible,
+      requires_client_approval: input.requires_client_approval,
+      triggers_draw_request:   input.triggers_draw_request,
+      triggers_invoice:        input.triggers_invoice,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
+
+export async function deleteMilestone(
+  client: SupabaseClient,
+  milestoneId: string,
+  tenantId: string,
+): Promise<void> {
+  const { error } = await client
+    .from('milestones')
+    .delete()
+    .eq('id', milestoneId)
+    .eq('tenant_id', tenantId)
+  if (error) throw error
+}

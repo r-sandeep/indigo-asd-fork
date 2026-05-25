@@ -1,13 +1,28 @@
 import { useState } from 'react'
 import { useOutletContext, useParams } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ProjectRow, ProjectPhase, ProjectMilestone } from '@indigo/shared'
+import {
+  upsertPhase,
+  upsertMilestone,
+  deletePhase,
+  deleteMilestone,
+} from '@indigo/shared'
+import type { UpsertPhaseInput, UpsertMilestoneInput } from '@indigo/shared'
 import { useProjectPhases } from '../useProject'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/hooks/useAuth'
+import { useToast } from '@/stores/toastStore'
 import { Skeleton } from '@/components/ui/Skeleton'
 import {
   CalendarIcon,
   EyeIcon,
   UserCheckIcon,
   ExclamationTriangleIcon,
+  PlusIcon,
+  PencilIcon,
+  TrashIcon,
+  XMarkIcon,
 } from '@/components/ui/Icons'
 
 interface OutletCtx {
@@ -42,6 +57,14 @@ function isOverdue(dueDate: string | null, completedDate: string | null): boolea
 
 // ── Status configs ─────────────────────────────────────────────────────────
 
+const PHASE_STATUSES = [
+  { value: 'not_started', label: 'Not Started' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'complete',    label: 'Complete'    },
+  { value: 'approved',    label: 'Approved'    },
+  { value: 'blocked',     label: 'Blocked'     },
+]
+
 const PHASE_STATUS: Record<string, { label: string; color: string; bg: string; ring: string }> = {
   complete:    { label: 'Complete',    color: 'text-green-700',  bg: 'bg-green-50',  ring: 'ring-green-200' },
   approved:    { label: 'Approved',    color: 'text-green-700',  bg: 'bg-green-50',  ring: 'ring-green-200' },
@@ -66,14 +89,450 @@ const PHASE_ACCENT: Record<string, string> = {
   blocked:     '#ef4444',
 }
 
+const PHASE_COLORS = [
+  '#6366f1', '#3b82f6', '#8b5cf6', '#ec4899',
+  '#10b981', '#f59e0b', '#ef4444', '#6b7280',
+]
+
+// ── Shared form helpers ────────────────────────────────────────────────────
+
+const inputCls =
+  'h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 ' +
+  'placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none ' +
+  'focus:ring-2 focus:ring-brand-100 transition-colors'
+
+const selectCls =
+  'h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 ' +
+  'focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors'
+
+// ── Modal wrapper ──────────────────────────────────────────────────────────
+
+function ModalShell({
+  title,
+  subtitle,
+  onClose,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center px-4 pb-4 sm:pb-0">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+            {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          >
+            <XMarkIcon className="h-4 w-4" strokeWidth={2} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ── Phase modal ────────────────────────────────────────────────────────────
+
+function PhaseModal({
+  projectId,
+  tenantId,
+  phase,
+  nextSequence,
+  onClose,
+  onSaved,
+}: {
+  projectId: string
+  tenantId: string
+  phase?: ProjectPhase
+  nextSequence: number
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast = useToast()
+  const isEdit = !!phase
+
+  const [name,        setName]        = useState(phase?.name        ?? '')
+  const [status,      setStatus]      = useState(phase?.status      ?? 'not_started')
+  const [startDate,   setStartDate]   = useState(phase?.start_date  ?? '')
+  const [endDate,     setEndDate]     = useState(phase?.end_date    ?? '')
+  const [color,       setColor]       = useState(phase?.color       ?? PHASE_COLORS[0])
+  const [description, setDescription] = useState(phase?.description ?? '')
+  const [nameError,   setNameError]   = useState('')
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const input: UpsertPhaseInput = {
+        id:          phase?.id,
+        name:        name.trim(),
+        status,
+        start_date:  startDate  || null,
+        end_date:    endDate    || null,
+        color,
+        description: description.trim() || null,
+        sequence:    phase?.sequence ?? nextSequence,
+      }
+      return upsertPhase(supabase, tenantId, projectId, input)
+    },
+    onSuccess: () => {
+      toast.success(isEdit ? 'Phase updated' : 'Phase added')
+      onSaved()
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Failed to save phase', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) { setNameError('Phase name is required'); return }
+    setNameError('')
+    mutation.mutate()
+  }
+
+  return (
+    <ModalShell
+      title={isEdit ? 'Edit Phase' : 'Add Phase'}
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {/* Name */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Phase Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Foundation"
+              className={`${inputCls} ${nameError ? 'border-red-300 bg-red-50' : ''}`}
+              autoFocus
+            />
+            {nameError && <p className="mt-1 text-xs text-red-600">{nameError}</p>}
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+              {PHASE_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Dates */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Start Date</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">End Date</label>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+
+          {/* Color */}
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Color</label>
+            <div className="flex items-center gap-2">
+              {PHASE_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  className={`h-7 w-7 rounded-full transition-transform ${color === c ? 'ring-2 ring-offset-2 ring-gray-400 scale-110' : 'hover:scale-105'}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="Brief notes about this phase"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-5 py-3">
+          <button type="button" onClick={onClose} disabled={mutation.isPending}
+            className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={mutation.isPending}
+            className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
+            {mutation.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Phase'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  )
+}
+
+// ── Milestone modal ────────────────────────────────────────────────────────
+
+function MilestoneModal({
+  projectId,
+  tenantId,
+  phases,
+  milestone,
+  defaultPhaseId,
+  nextSequence,
+  onClose,
+  onSaved,
+}: {
+  projectId: string
+  tenantId: string
+  phases: ProjectPhase[]
+  milestone?: ProjectMilestone
+  defaultPhaseId?: string
+  nextSequence: number
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast  = useToast()
+  const isEdit = !!milestone
+
+  const [name,                  setName]                  = useState(milestone?.name                   ?? '')
+  const [phaseId,               setPhaseId]               = useState(milestone?.phase_id               ?? defaultPhaseId ?? '')
+  const [status,                setStatus]                = useState(milestone?.status                  ?? 'not_started')
+  const [dueDate,               setDueDate]               = useState(milestone?.due_date                ?? '')
+  const [completedDate,         setCompletedDate]         = useState(milestone?.completed_date          ?? '')
+  const [description,           setDescription]           = useState(milestone?.description             ?? '')
+  const [isClientVisible,       setIsClientVisible]       = useState(milestone?.is_client_visible       ?? true)
+  const [requiresApproval,      setRequiresApproval]      = useState(milestone?.requires_client_approval ?? false)
+  const [triggersDraw,          setTriggersDraw]          = useState(milestone?.triggers_draw_request   ?? false)
+  const [triggersInvoice,       setTriggersInvoice]       = useState(milestone?.triggers_invoice        ?? false)
+  const [nameError,             setNameError]             = useState('')
+
+  const showCompletedDate = status === 'complete' || status === 'approved'
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const input: UpsertMilestoneInput = {
+        id:                       milestone?.id,
+        phase_id:                 phaseId  || null,
+        name:                     name.trim(),
+        description:              description.trim() || null,
+        due_date:                 dueDate        || null,
+        completed_date:           showCompletedDate ? (completedDate || null) : null,
+        status,
+        sequence:                 milestone?.sequence ?? nextSequence,
+        is_client_visible:        isClientVisible,
+        requires_client_approval: requiresApproval,
+        triggers_draw_request:    triggersDraw,
+        triggers_invoice:         triggersInvoice,
+      }
+      return upsertMilestone(supabase, tenantId, projectId, input)
+    },
+    onSuccess: () => {
+      toast.success(isEdit ? 'Milestone updated' : 'Milestone added')
+      onSaved()
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Failed to save milestone', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) { setNameError('Milestone name is required'); return }
+    setNameError('')
+    mutation.mutate()
+  }
+
+  return (
+    <ModalShell
+      title={isEdit ? 'Edit Milestone' : 'Add Milestone'}
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {/* Name */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Milestone Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Framing complete"
+              className={`${inputCls} ${nameError ? 'border-red-300 bg-red-50' : ''}`}
+              autoFocus
+            />
+            {nameError && <p className="mt-1 text-xs text-red-600">{nameError}</p>}
+          </div>
+
+          {/* Phase + Status */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Phase</label>
+              <select value={phaseId} onChange={(e) => setPhaseId(e.target.value)} className={selectCls}>
+                <option value="">No phase</option>
+                {phases.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+                {PHASE_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Due date + completed date */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Due Date</label>
+              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputCls} />
+            </div>
+            {showCompletedDate && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Completed Date</label>
+                <input type="date" value={completedDate} onChange={(e) => setCompletedDate(e.target.value)} className={inputCls} />
+              </div>
+            )}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Description <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="Additional notes"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none"
+            />
+          </div>
+
+          {/* Toggles */}
+          <div className="space-y-2.5 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Options</p>
+            {([
+              ['Client visible',        isClientVisible,  setIsClientVisible],
+              ['Requires client approval', requiresApproval, setRequiresApproval],
+              ['Triggers draw request', triggersDraw,     setTriggersDraw],
+              ['Triggers invoice',      triggersInvoice,  setTriggersInvoice],
+            ] as [string, boolean, (v: boolean) => void][]).map(([label, val, setter]) => (
+              <label key={label} className="flex cursor-pointer items-center justify-between gap-3">
+                <span className="text-sm text-gray-700">{label}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={val}
+                  onClick={() => setter(!val)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${val ? 'bg-brand-600' : 'bg-gray-300'}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${val ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </button>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-5 py-3">
+          <button type="button" onClick={onClose} disabled={mutation.isPending}
+            className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={mutation.isPending}
+            className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
+            {mutation.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Milestone'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  )
+}
+
+// ── Delete confirm modal ───────────────────────────────────────────────────
+
+function DeleteConfirmModal({
+  label,
+  onConfirm,
+  onClose,
+  isPending,
+}: {
+  label: string
+  onConfirm: () => void
+  onClose: () => void
+  isPending: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+        <p className="text-sm font-semibold text-gray-900">Delete {label}?</p>
+        <p className="mt-1 text-sm text-gray-500">This cannot be undone.</p>
+        <div className="mt-5 flex justify-end gap-3">
+          <button onClick={onClose} disabled={isPending}
+            className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} disabled={isPending}
+            className="inline-flex h-8 items-center rounded-lg bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60">
+            {isPending ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal state ────────────────────────────────────────────────────────────
+
+type ModalState =
+  | { type: 'none' }
+  | { type: 'add-phase' }
+  | { type: 'edit-phase'; phase: ProjectPhase }
+  | { type: 'add-milestone'; phaseId: string; nextSeq: number }
+  | { type: 'edit-milestone'; milestone: ProjectMilestone }
+  | { type: 'delete-phase'; phase: ProjectPhase }
+  | { type: 'delete-milestone'; milestone: ProjectMilestone }
+
 // ── Milestone row (list view) ──────────────────────────────────────────────
 
 function MilestoneRow({
   milestone,
   isLast,
+  onEdit,
+  onDelete,
 }: {
   milestone: ProjectMilestone
   isLast: boolean
+  onEdit: (m: ProjectMilestone) => void
+  onDelete: (m: ProjectMilestone) => void
 }) {
   const cfg     = MILESTONE_STATUS[milestone.status] ?? MILESTONE_STATUS.not_started
   const done    = milestone.status === 'complete' || milestone.status === 'approved'
@@ -81,7 +540,7 @@ function MilestoneRow({
   const blocked = milestone.status === 'blocked'
 
   return (
-    <div className={`relative flex gap-3 py-3 ${!isLast ? 'border-b border-gray-100' : ''}`}>
+    <div className={`group relative flex gap-3 py-3 ${!isLast ? 'border-b border-gray-100' : ''}`}>
       <div className="flex flex-col items-center pt-0.5">
         <div className={`h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white ${cfg.dot}`} />
         {!isLast && <div className="mt-1 w-px flex-1 bg-gray-200" />}
@@ -119,19 +578,37 @@ function MilestoneRow({
             </div>
           </div>
 
-          <div className="shrink-0 text-right">
+          <div className="flex items-center gap-1 shrink-0">
             {done && milestone.completed_date ? (
               <span className="text-xs text-green-600">
                 ✓ {fmtDateShort(milestone.completed_date)}
               </span>
             ) : milestone.due_date ? (
-              <span className={`text-xs ${
-                overdue ? 'font-medium text-amber-600' : 'text-gray-400'
-              }`}>
+              <span className={`text-xs ${overdue ? 'font-medium text-amber-600' : 'text-gray-400'}`}>
                 {overdue ? '⚠ Due ' : 'Due '}
                 {fmtDateShort(milestone.due_date)}
               </span>
             ) : null}
+
+            {/* Action buttons — visible on hover */}
+            <div className="ml-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onEdit(milestone) }}
+                className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-brand-600 transition-colors"
+                title="Edit milestone"
+              >
+                <PencilIcon className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onDelete(milestone) }}
+                className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                title="Delete milestone"
+              >
+                <TrashIcon className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -145,7 +622,21 @@ function MilestoneRow({
 
 // ── Phase card (list view) ─────────────────────────────────────────────────
 
-function PhaseCard({ phase }: { phase: ProjectPhase }) {
+function PhaseCard({
+  phase,
+  onEditPhase,
+  onDeletePhase,
+  onAddMilestone,
+  onEditMilestone,
+  onDeleteMilestone,
+}: {
+  phase: ProjectPhase
+  onEditPhase: (p: ProjectPhase) => void
+  onDeletePhase: (p: ProjectPhase) => void
+  onAddMilestone: (phaseId: string, nextSeq: number) => void
+  onEditMilestone: (m: ProjectMilestone) => void
+  onDeleteMilestone: (m: ProjectMilestone) => void
+}) {
   const cfg         = PHASE_STATUS[phase.status] ?? PHASE_STATUS.not_started
   const accentColor = phase.color ?? PHASE_ACCENT[phase.status] ?? '#d1d5db'
   const total       = phase.milestones.length
@@ -176,11 +667,32 @@ function PhaseCard({ phase }: { phase: ProjectPhase }) {
           )}
         </div>
 
-        <div className="shrink-0 text-right">
-          <p className="text-sm font-semibold tabular-nums text-gray-700">
-            {total > 0 ? `${completed} / ${total}` : '—'}
-          </p>
-          <p className="text-xs text-gray-400">milestones</p>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="text-right">
+            <p className="text-sm font-semibold tabular-nums text-gray-700">
+              {total > 0 ? `${completed} / ${total}` : '—'}
+            </p>
+            <p className="text-xs text-gray-400">milestones</p>
+          </div>
+          {/* Phase actions */}
+          <div className="flex items-center gap-0.5 ml-1">
+            <button
+              type="button"
+              onClick={() => onEditPhase(phase)}
+              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-brand-600 transition-colors"
+              title="Edit phase"
+            >
+              <PencilIcon className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeletePhase(phase)}
+              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+              title="Delete phase"
+            >
+              <TrashIcon className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -196,14 +708,32 @@ function PhaseCard({ phase }: { phase: ProjectPhase }) {
       {sorted.length > 0 ? (
         <div className="px-5 py-1">
           {sorted.map((m, i) => (
-            <MilestoneRow key={m.id} milestone={m} isLast={i === sorted.length - 1} />
+            <MilestoneRow
+              key={m.id}
+              milestone={m}
+              isLast={i === sorted.length - 1}
+              onEdit={onEditMilestone}
+              onDelete={onDeleteMilestone}
+            />
           ))}
         </div>
       ) : (
-        <div className="px-5 py-4 text-center text-xs text-gray-400">
-          No milestones defined for this phase.
+        <div className="px-5 py-3 text-center text-xs text-gray-400">
+          No milestones yet.
         </div>
       )}
+
+      {/* Add milestone button */}
+      <div className="border-t border-gray-100 px-5 py-2.5">
+        <button
+          type="button"
+          onClick={() => onAddMilestone(phase.id, sorted.length)}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-brand-600 transition-colors"
+        >
+          <PlusIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
+          Add milestone
+        </button>
+      </div>
     </div>
   )
 }
@@ -213,7 +743,6 @@ function PhaseCard({ phase }: { phase: ProjectPhase }) {
 function GanttView({ phases }: { phases: ProjectPhase[] }) {
   const sorted = [...phases].sort((a, b) => a.sequence - b.sequence)
 
-  // Collect all relevant dates to determine chart bounds
   const allDates: Date[] = []
   for (const phase of sorted) {
     if (phase.start_date) allDates.push(new Date(phase.start_date + 'T00:00:00'))
@@ -239,7 +768,6 @@ function GanttView({ phases }: { phases: ProjectPhase[] }) {
   const minDate = new Date(Math.min(...allDates.map((d) => d.getTime())))
   const maxDate = new Date(Math.max(...allDates.map((d) => d.getTime())))
 
-  // Pad 2 weeks on each side for breathing room
   minDate.setDate(minDate.getDate() - 14)
   maxDate.setDate(maxDate.getDate() + 14)
 
@@ -252,7 +780,6 @@ function GanttView({ phases }: { phases: ProjectPhase[] }) {
     return Math.max(0, Math.min(100, ((d.getTime() - minDate.getTime()) / totalMs) * 100))
   }
 
-  // Month grid lines
   const months: { label: string; pct: number }[] = []
   const cur = new Date(minDate)
   cur.setDate(1)
@@ -263,119 +790,66 @@ function GanttView({ phases }: { phases: ProjectPhase[] }) {
     cur.setMonth(cur.getMonth() + 1)
   }
 
-  // Today line
-  const today        = new Date()
-  const todayPct     = ((today.getTime() - minDate.getTime()) / totalMs) * 100
-  const showToday    = todayPct >= 0 && todayPct <= 100
-
-  const LEFT_COL_W = 180 // px
+  const today     = new Date()
+  const todayPct  = ((today.getTime() - minDate.getTime()) / totalMs) * 100
+  const showToday = todayPct >= 0 && todayPct <= 100
+  const LEFT_COL_W = 180
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
       <div className="overflow-x-auto">
         <div style={{ minWidth: 600 }}>
-
-          {/* Header row: month labels */}
           <div className="flex border-b border-gray-200 bg-gray-50">
-            <div
-              className="shrink-0 border-r border-gray-200 px-4 py-2.5"
-              style={{ width: LEFT_COL_W }}
-            >
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                Phase
-              </span>
+            <div className="shrink-0 border-r border-gray-200 px-4 py-2.5" style={{ width: LEFT_COL_W }}>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Phase</span>
             </div>
             <div className="relative flex-1 overflow-hidden py-2.5" style={{ height: 32 }}>
               {months.map((m) => (
-                <span
-                  key={m.label}
-                  className="absolute text-[10px] font-medium text-gray-400"
-                  style={{ left: `${m.pct}%`, transform: 'translateX(-4px)' }}
-                >
+                <span key={m.label} className="absolute text-[10px] font-medium text-gray-400"
+                  style={{ left: `${m.pct}%`, transform: 'translateX(-4px)' }}>
                   {m.label}
                 </span>
               ))}
             </div>
           </div>
 
-          {/* Phase rows */}
           {sorted.map((phase) => {
             const accentColor = phase.color ?? PHASE_ACCENT[phase.status] ?? '#d1d5db'
             const cfg         = PHASE_STATUS[phase.status] ?? PHASE_STATUS.not_started
             const hasBar      = !!(phase.start_date && phase.end_date)
             const barLeft     = hasBar ? toPct(phase.start_date) : -1
-            // Add 1 day to end so bar covers the full end day
             const barRight    = hasBar ? toPct(phase.end_date, 1) : -1
             const barWidth    = hasBar ? Math.max(barRight - barLeft, 0.5) : 0
             const milestones  = phase.milestones.filter((m) => m.due_date)
 
             return (
-              <div
-                key={phase.id}
-                className="flex border-b border-gray-100 last:border-0 hover:bg-gray-50/50"
-              >
-                {/* Phase label */}
-                <div
-                  className="flex shrink-0 flex-col justify-center border-r border-gray-100 px-4 py-3"
-                  style={{ width: LEFT_COL_W }}
-                >
+              <div key={phase.id} className="flex border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
+                <div className="flex shrink-0 flex-col justify-center border-r border-gray-100 px-4 py-3" style={{ width: LEFT_COL_W }}>
                   <span className="truncate text-xs font-semibold text-gray-800">{phase.name}</span>
                   <span className={`mt-0.5 text-[10px] font-medium ${cfg.color}`}>{cfg.label}</span>
                 </div>
-
-                {/* Timeline area */}
                 <div className="relative flex-1" style={{ minHeight: 52 }}>
-                  {/* Month grid lines */}
                   {months.map((m) => (
-                    <div
-                      key={m.label}
-                      className="absolute inset-y-0 w-px bg-gray-100"
-                      style={{ left: `${m.pct}%` }}
-                    />
+                    <div key={m.label} className="absolute inset-y-0 w-px bg-gray-100" style={{ left: `${m.pct}%` }} />
                   ))}
-
-                  {/* Today line */}
                   {showToday && (
-                    <div
-                      className="absolute inset-y-0 w-px bg-red-300"
-                      style={{ left: `${todayPct}%` }}
-                    />
+                    <div className="absolute inset-y-0 w-px bg-red-300" style={{ left: `${todayPct}%` }} />
                   )}
-
-                  {/* Phase bar */}
                   {hasBar && (
-                    <div
-                      className="absolute top-1/2 h-6 -translate-y-1/2 rounded-md"
-                      style={{
-                        left:            `${barLeft}%`,
-                        width:           `${barWidth}%`,
-                        backgroundColor: accentColor,
-                        opacity:         0.85,
-                      }}
-                    />
+                    <div className="absolute top-1/2 h-6 -translate-y-1/2 rounded-md"
+                      style={{ left: `${barLeft}%`, width: `${barWidth}%`, backgroundColor: accentColor, opacity: 0.85 }} />
                   )}
-
-                  {/* Milestone diamonds */}
                   {milestones.map((m) => {
-                    const mp      = toPct(m.due_date)
+                    const mp    = toPct(m.due_date)
                     if (mp < 0) return null
-                    const done    = m.status === 'complete' || m.status === 'approved'
+                    const done  = m.status === 'complete' || m.status === 'approved'
                     const overdue = isOverdue(m.due_date, m.completed_date)
-                    const color   = done    ? '#16a34a'
-                                  : overdue ? '#f59e0b'
-                                  : m.status === 'blocked' ? '#ef4444'
-                                  : '#6366f1'
+                    const color = done ? '#16a34a' : overdue ? '#f59e0b' : m.status === 'blocked' ? '#ef4444' : '#6366f1'
                     return (
-                      <div
-                        key={m.id}
-                        className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-default"
+                      <div key={m.id} className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-default"
                         style={{ left: `${mp}%` }}
-                        title={`${m.name} — Due ${fmtDateShort(m.due_date)}${done ? ' ✓' : overdue ? ' (overdue)' : ''}`}
-                      >
-                        <div
-                          className="h-3.5 w-3.5 rotate-45 rounded-sm ring-2 ring-white"
-                          style={{ backgroundColor: color }}
-                        />
+                        title={`${m.name} — Due ${fmtDateShort(m.due_date)}${done ? ' ✓' : overdue ? ' (overdue)' : ''}`}>
+                        <div className="h-3.5 w-3.5 rotate-45 rounded-sm ring-2 ring-white" style={{ backgroundColor: color }} />
                       </div>
                     )
                   })}
@@ -384,24 +858,17 @@ function GanttView({ phases }: { phases: ProjectPhase[] }) {
             )
           })}
 
-          {/* Today label footer */}
           {showToday && (
             <div className="flex border-t border-gray-100 bg-gray-50">
               <div className="shrink-0 border-r border-gray-100" style={{ width: LEFT_COL_W }} />
               <div className="relative flex-1 py-1.5">
-                <div
-                  className="absolute flex items-center gap-0.5"
-                  style={{ left: `${todayPct}%`, transform: 'translateX(-50%)' }}
-                >
-                  <span className="rounded bg-red-400 px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                    Today
-                  </span>
+                <div className="absolute flex items-center gap-0.5" style={{ left: `${todayPct}%`, transform: 'translateX(-50%)' }}>
+                  <span className="rounded bg-red-400 px-1.5 py-0.5 text-[9px] font-semibold text-white">Today</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Legend */}
           <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
             <div className="flex items-center gap-1.5">
               <div className="h-3 w-6 rounded-sm bg-gray-400 opacity-80" />
@@ -468,12 +935,10 @@ function SummaryBar({ phases }: { phases: ProjectPhase[] }) {
   const totalPhases     = phases.length
   const totalMilestones = phases.reduce((n, p) => n + p.milestones.length, 0)
   const doneMilestones  = phases.reduce(
-    (n, p) => n + p.milestones.filter((m) => m.status === 'complete' || m.status === 'approved').length,
-    0,
+    (n, p) => n + p.milestones.filter((m) => m.status === 'complete' || m.status === 'approved').length, 0,
   )
   const overdueMilestones = phases.reduce(
-    (n, p) => n + p.milestones.filter((m) => isOverdue(m.due_date, m.completed_date)).length,
-    0,
+    (n, p) => n + p.milestones.filter((m) => isOverdue(m.due_date, m.completed_date)).length, 0,
   )
   const blockedPhases = phases.filter((p) => p.status === 'blocked').length
   const pct = totalMilestones > 0 ? Math.round((doneMilestones / totalMilestones) * 100) : 0
@@ -498,28 +963,20 @@ function SummaryBar({ phases }: { phases: ProjectPhase[] }) {
         {overdueMilestones > 0 && (
           <div className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2">
             <ExclamationTriangleIcon className="h-4 w-4 text-amber-500" strokeWidth={2} />
-            <span className="text-sm font-medium text-amber-700">
-              {overdueMilestones} overdue
-            </span>
+            <span className="text-sm font-medium text-amber-700">{overdueMilestones} overdue</span>
           </div>
         )}
         {blockedPhases > 0 && (
           <div className="flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2">
             <ExclamationTriangleIcon className="h-4 w-4 text-red-500" strokeWidth={2} />
-            <span className="text-sm font-medium text-red-700">
-              {blockedPhases} blocked
-            </span>
+            <span className="text-sm font-medium text-red-700">{blockedPhases} blocked</span>
           </div>
         )}
       </div>
-
       {totalMilestones > 0 && (
         <div className="mt-3">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-            <div
-              className="h-full rounded-full bg-brand-500 transition-all duration-500"
-              style={{ width: `${pct}%` }}
-            />
+            <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${pct}%` }} />
           </div>
         </div>
       )}
@@ -535,15 +992,10 @@ function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMo
   return (
     <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
       {(['list', 'gantt'] as ViewMode[]).map((v) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
+        <button key={v} onClick={() => onChange(v)}
           className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors capitalize ${
-            value === v
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
+            value === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}>
           {v === 'list' ? '☰  List' : '▬  Gantt'}
         </button>
       ))}
@@ -554,13 +1006,33 @@ function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMo
 // ── Main component ─────────────────────────────────────────────────────────
 
 export function ScheduleTab() {
-  const { id } = useParams<{ id: string }>()
+  const { id: projectId } = useParams<{ id: string }>()
   const { isLoading: projectLoading } = useOutletContext<OutletCtx>()
-  const { data: phases, isLoading: phasesLoading } = useProjectPhases(id)
+  const { activeTenantId } = useAuth()
+  const { data: phases, isLoading: phasesLoading } = useProjectPhases(projectId)
+  const queryClient = useQueryClient()
   const [view, setView] = useState<ViewMode>('list')
+  const [modal, setModal] = useState<ModalState>({ type: 'none' })
 
   const isLoading = projectLoading || phasesLoading
   const sorted    = phases ? [...phases].sort((a, b) => a.sequence - b.sequence) : []
+  const tenantId  = activeTenantId ?? ''
+
+  function refresh() {
+    void queryClient.invalidateQueries({ queryKey: ['project-phases', projectId] })
+  }
+
+  // Delete phase mutation
+  const deletePhaseMut = useMutation({
+    mutationFn: (phaseId: string) => deletePhase(supabase, phaseId, tenantId),
+    onSuccess: () => { refresh(); setModal({ type: 'none' }) },
+  })
+
+  // Delete milestone mutation
+  const deleteMilestoneMut = useMutation({
+    mutationFn: (milestoneId: string) => deleteMilestone(supabase, milestoneId, tenantId),
+    onSuccess: () => { refresh(); setModal({ type: 'none' }) },
+  })
 
   return (
     <div className="px-5 py-6 lg:px-8">
@@ -570,28 +1042,94 @@ export function ScheduleTab() {
         <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 bg-white py-16 text-center">
           <CalendarIcon className="mx-auto h-10 w-10 text-gray-300" strokeWidth={1} />
           <h3 className="mt-3 text-sm font-semibold text-gray-900">No schedule yet</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Phases and milestones will appear here once added.
+          <p className="mt-1 text-sm text-gray-500 max-w-xs">
+            Add a phase to start building the project schedule.
           </p>
+          <button
+            onClick={() => setModal({ type: 'add-phase' })}
+            className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 transition-colors"
+          >
+            <PlusIcon className="h-4 w-4" strokeWidth={2.5} />
+            Add Phase
+          </button>
         </div>
       ) : (
         <>
           <SummaryBar phases={sorted} />
 
-          <div className="mb-4 flex justify-end">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <button
+              onClick={() => setModal({ type: 'add-phase' })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 hover:border-brand-300 hover:text-brand-700 transition-colors"
+            >
+              <PlusIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Add Phase
+            </button>
             <ViewToggle value={view} onChange={setView} />
           </div>
 
           {view === 'list' ? (
             <div className="space-y-4">
               {sorted.map((phase) => (
-                <PhaseCard key={phase.id} phase={phase} />
+                <PhaseCard
+                  key={phase.id}
+                  phase={phase}
+                  onEditPhase={(p) => setModal({ type: 'edit-phase', phase: p })}
+                  onDeletePhase={(p) => setModal({ type: 'delete-phase', phase: p })}
+                  onAddMilestone={(phaseId, nextSeq) => setModal({ type: 'add-milestone', phaseId, nextSeq })}
+                  onEditMilestone={(m) => setModal({ type: 'edit-milestone', milestone: m })}
+                  onDeleteMilestone={(m) => setModal({ type: 'delete-milestone', milestone: m })}
+                />
               ))}
             </div>
           ) : (
             <GanttView phases={sorted} />
           )}
         </>
+      )}
+
+      {/* ── Modals ──────────────────────────────────────────────────────── */}
+
+      {(modal.type === 'add-phase' || modal.type === 'edit-phase') && (
+        <PhaseModal
+          projectId={projectId!}
+          tenantId={tenantId}
+          phase={modal.type === 'edit-phase' ? modal.phase : undefined}
+          nextSequence={sorted.length}
+          onClose={() => setModal({ type: 'none' })}
+          onSaved={refresh}
+        />
+      )}
+
+      {(modal.type === 'add-milestone' || modal.type === 'edit-milestone') && (
+        <MilestoneModal
+          projectId={projectId!}
+          tenantId={tenantId}
+          phases={sorted}
+          milestone={modal.type === 'edit-milestone' ? modal.milestone : undefined}
+          defaultPhaseId={modal.type === 'add-milestone' ? modal.phaseId : undefined}
+          nextSequence={modal.type === 'add-milestone' ? modal.nextSeq : 0}
+          onClose={() => setModal({ type: 'none' })}
+          onSaved={refresh}
+        />
+      )}
+
+      {modal.type === 'delete-phase' && (
+        <DeleteConfirmModal
+          label={`phase "${modal.phase.name}"`}
+          onConfirm={() => deletePhaseMut.mutate(modal.phase.id)}
+          onClose={() => setModal({ type: 'none' })}
+          isPending={deletePhaseMut.isPending}
+        />
+      )}
+
+      {modal.type === 'delete-milestone' && (
+        <DeleteConfirmModal
+          label={`milestone "${modal.milestone.name}"`}
+          onConfirm={() => deleteMilestoneMut.mutate(modal.milestone.id)}
+          onClose={() => setModal({ type: 'none' })}
+          isPending={deleteMilestoneMut.isPending}
+        />
       )}
     </div>
   )
