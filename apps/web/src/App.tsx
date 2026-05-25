@@ -10,6 +10,7 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 import { OverviewTab } from '@/features/projects/tabs/OverviewTab'
+import { ScheduleTab } from '@/features/projects/tabs/ScheduleTab'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
@@ -38,7 +39,7 @@ function AuthRoutes() {
         <Route path="projects/:id"    element={<ProjectDetailPage />}>
           <Route index                element={<Navigate to="overview" replace />} />
           <Route path="overview"      element={<OverviewTab />} />
-          <Route path="schedule"      element={<ComingSoon name="Schedule" />} />
+          <Route path="schedule"      element={<ScheduleTab />} />
           <Route path="financials"    element={<ComingSoon name="Financials" />} />
           <Route path="documents"     element={<ComingSoon name="Documents" />} />
           <Route path="field"         element={<ComingSoon name="Field" />} />

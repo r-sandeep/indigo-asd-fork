@@ -13,7 +13,7 @@ interface Tab {
 function tabs(id: string): Tab[] {
   return [
     { to: `/projects/${id}/overview`,    label: 'Overview',    live: true },
-    { to: `/projects/${id}/schedule`,    label: 'Schedule' },
+    { to: `/projects/${id}/schedule`,    label: 'Schedule',    live: true },
     { to: `/projects/${id}/financials`,  label: 'Financials' },
     { to: `/projects/${id}/documents`,   label: 'Documents' },
     { to: `/projects/${id}/field`,       label: 'Field' },
@@ -65,8 +65,8 @@ export function ProjectDetailPage() {
                     <h1 className="text-xl font-semibold text-gray-900 leading-tight">
                       {job?.job_name ?? 'Unknown Project'}
                     </h1>
-                    {job?.job_type && <TypeBadge type={job.job_type} />}
-                    {job?.status && <StatusBadge status={job.status} />}
+                    {job?.project_type && <TypeBadge type={job.project_type} />}
+                    {job?.project_status && <StatusBadge status={job.project_status} />}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
                     <span className="font-mono text-xs text-gray-400">{job?.job_number}</span>
