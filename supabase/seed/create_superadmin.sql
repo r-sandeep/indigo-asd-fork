@@ -81,13 +81,12 @@ BEGIN
   END IF;
 
   -- -------------------------------------------------------------------
-  -- 3. Create user_profile (id + email only — safest common columns)
-  --    We will update with name/avatar once the exact schema is confirmed.
+  -- 3. Create user_profile — insert id only (PK guaranteed to exist).
+  --    Profile columns (name, email, avatar) added after schema confirmed.
   -- -------------------------------------------------------------------
-  INSERT INTO public.user_profiles (id, email)
-  VALUES (v_user_id, v_user_email)
-  ON CONFLICT (id) DO UPDATE
-    SET email = EXCLUDED.email;
+  INSERT INTO public.user_profiles (id)
+  VALUES (v_user_id)
+  ON CONFLICT (id) DO NOTHING;
 
   -- -------------------------------------------------------------------
   -- 4. Create tenant_member with owner role
