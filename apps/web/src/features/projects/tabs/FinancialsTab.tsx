@@ -8,12 +8,15 @@ import type {
   ProjectDrawSchedule,
   ProjectInvoice,
   CreateChangeOrderInput,
+  UpdateChangeOrderInput,
   CreateDrawScheduleInput,
   CreateDrawRequestInput,
 } from '@indigo/shared'
 import {
   formatMoney,
   createChangeOrder,
+  updateChangeOrder,
+  withdrawChangeOrder,
   createDrawSchedule,
   createDrawRequest,
 } from '@indigo/shared'
@@ -28,6 +31,7 @@ import { useToast } from '@/stores/toastStore'
 import { Skeleton } from '@/components/ui/Skeleton'
 import {
   ExclamationTriangleIcon,
+  PencilIcon,
   PlusIcon,
   XMarkIcon,
 } from '@/components/ui/Icons'
@@ -293,6 +297,138 @@ function CreateCOModal({
           <button type="submit" disabled={mutation.isPending}
             className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60">
             {mutation.isPending ? 'Creating…' : 'Create CO'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  )
+}
+
+// ── Edit CO modal ──────────────────────────────────────────────────────────
+
+function EditCOModal({
+  co,
+  onClose,
+  onSaved,
+}: {
+  co: ProjectChangeOrder
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast = useToast()
+
+  const [coNumber,       setCoNumber]       = useState(co.co_number)
+  const [title,          setTitle]          = useState(co.title ?? '')
+  const [amountStr,      setAmountStr]      = useState(String(co.amount_cents / 100))
+  const [coStatus,       setCoStatus]       = useState(co.co_status ?? 'draft')
+  const [description,    setDescription]    = useState(co.description ?? '')
+  const [reason,         setReason]         = useState(co.reason ?? '')
+  const [dateSubmitted,  setDateSubmitted]  = useState(co.date_submitted ?? '')
+  const [scheduleImpact, setScheduleImpact] = useState(co.schedule_impact_days != null ? String(co.schedule_impact_days) : '')
+  const [notes,          setNotes]          = useState(co.notes ?? '')
+  const [errors,         setErrors]         = useState<Record<string, string>>({})
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const input: UpdateChangeOrderInput = {
+        co_number:            coNumber.trim(),
+        title:                title.trim() || null,
+        description:          description.trim() || null,
+        amount_cents:         parseDollars(amountStr),
+        co_status:            coStatus,
+        date_submitted:       dateSubmitted || null,
+        schedule_impact_days: scheduleImpact ? parseInt(scheduleImpact, 10) : null,
+        reason:               reason.trim() || null,
+        notes:                notes.trim() || null,
+      }
+      return updateChangeOrder(supabase, co.id, input)
+    },
+    onSuccess: () => {
+      toast.success('Change order updated')
+      onSaved()
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Failed to update change order', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const e2: Record<string, string> = {}
+    if (!coNumber.trim()) e2.coNumber = 'CO number is required'
+    setErrors(e2)
+    if (Object.keys(e2).length > 0) return
+    mutation.mutate()
+  }
+
+  return (
+    <ModalShell title={`Edit ${co.co_number}`} subtitle="Update this change order" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="CO Number" required error={errors.coNumber}>
+              <input type="text" value={coNumber} onChange={(e) => setCoNumber(e.target.value)}
+                placeholder="CO-001" className={`${inputCls} font-mono ${errors.coNumber ? 'border-red-300 bg-red-50' : ''}`} autoFocus />
+            </Field>
+            <Field label="Status">
+              <select value={coStatus} onChange={(e) => setCoStatus(e.target.value)} className={selectCls}>
+                {CO_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Title" hint="optional">
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
+              placeholder="Brief description" className={inputCls} />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Amount" hint="negative for deductive">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                <input type="number" step="0.01" value={amountStr} onChange={(e) => setAmountStr(e.target.value)}
+                  placeholder="0.00" className={`${inputCls} pl-7`} />
+              </div>
+            </Field>
+            <Field label="Schedule Impact" hint="days, negative ok">
+              <input type="number" value={scheduleImpact} onChange={(e) => setScheduleImpact(e.target.value)}
+                placeholder="0" className={inputCls} />
+            </Field>
+          </div>
+
+          <Field label="Date Submitted" hint="optional">
+            <input type="date" value={dateSubmitted} onChange={(e) => setDateSubmitted(e.target.value)} className={inputCls} />
+          </Field>
+
+          <Field label="Description" hint="optional">
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2}
+              placeholder="Scope of work change…"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none" />
+          </Field>
+
+          <Field label="Reason" hint="optional">
+            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+              placeholder="Why this change is needed…"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none" />
+          </Field>
+
+          <Field label="Internal Notes" hint="optional">
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+              placeholder="Notes for your team…"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none" />
+          </Field>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-5 py-3">
+          <button type="button" onClick={onClose} disabled={mutation.isPending}
+            className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={mutation.isPending}
+            className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60">
+            {mutation.isPending ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </form>
@@ -591,12 +727,20 @@ function ContractSummary({
 
 // ── Change Orders ──────────────────────────────────────────────────────────
 
+const CO_EDITABLE = new Set(['draft', 'pending_approval'])
+
 function ChangeOrdersSection({
   changeOrders,
   onAdd,
+  onEdit,
+  onWithdraw,
+  withdrawingId,
 }: {
   changeOrders: ProjectChangeOrder[]
   onAdd: () => void
+  onEdit: (co: ProjectChangeOrder) => void
+  onWithdraw: (co: ProjectChangeOrder) => void
+  withdrawingId: string | null
 }) {
   const total = changeOrders.reduce((sum, co) => sum + co.amount_cents, 0)
 
@@ -635,37 +779,68 @@ function ChangeOrdersSection({
         </div>
       ) : (
         <div className="divide-y divide-gray-100">
-          {changeOrders.map((co) => (
-            <div key={co.id} className="flex items-start gap-4 px-5 py-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs font-semibold text-gray-500">{co.co_number}</span>
-                  <span className="text-sm font-medium text-gray-900 truncate">
-                    {co.title ?? co.description ?? '—'}
-                  </span>
-                  <StatusBadge status={co.co_status} map={CO_STATUS} />
+          {changeOrders.map((co) => {
+            const isEditable   = CO_EDITABLE.has(co.co_status ?? '')
+            const isPending    = co.co_status === 'pending_approval'
+            const isWithdrawing = withdrawingId === co.id
+
+            return (
+              <div key={co.id} className="flex items-start gap-4 px-5 py-4 group">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs font-semibold text-gray-500">{co.co_number}</span>
+                    <span className="text-sm font-medium text-gray-900 truncate">
+                      {co.title ?? co.description ?? '—'}
+                    </span>
+                    <StatusBadge status={co.co_status} map={CO_STATUS} />
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-3">
+                    {co.schedule_impact_days != null && co.schedule_impact_days !== 0 && (
+                      <p className="text-xs text-gray-400">
+                        {co.schedule_impact_days > 0 ? '+' : ''}{co.schedule_impact_days} day schedule impact
+                      </p>
+                    )}
+                    {co.approved_at && (
+                      <p className="text-xs text-gray-400">Approved {fmtDate(co.approved_at)}</p>
+                    )}
+                    {/* Withdraw button — only for pending_approval */}
+                    {isPending && (
+                      <button
+                        onClick={() => onWithdraw(co)}
+                        disabled={isWithdrawing}
+                        className="text-xs font-medium text-amber-600 hover:text-amber-700 transition-colors disabled:opacity-50"
+                      >
+                        {isWithdrawing ? 'Withdrawing…' : 'Withdraw to draft'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {co.schedule_impact_days != null && co.schedule_impact_days !== 0 && (
-                  <p className="mt-0.5 text-xs text-gray-400">
-                    {co.schedule_impact_days > 0 ? '+' : ''}{co.schedule_impact_days} day schedule impact
-                  </p>
-                )}
-                {co.approved_at && (
-                  <p className="mt-0.5 text-xs text-gray-400">Approved {fmtDate(co.approved_at)}</p>
-                )}
+
+                <div className="shrink-0 flex items-start gap-2">
+                  {/* Edit button — draft and pending_approval */}
+                  {isEditable && (
+                    <button
+                      onClick={() => onEdit(co)}
+                      className="rounded p-1 text-gray-300 opacity-0 group-hover:opacity-100 hover:bg-gray-100 hover:text-gray-600 transition-all"
+                      title="Edit change order"
+                    >
+                      <PencilIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                    </button>
+                  )}
+                  <div className="text-right">
+                    <p className={`text-sm font-semibold tabular-nums ${
+                      co.amount_cents >= 0 ? 'text-gray-900' : 'text-red-700'
+                    }`}>
+                      {co.amount_cents >= 0 ? '+' : ''}{formatMoney(co.amount_cents)}
+                    </p>
+                    {co.date_submitted && (
+                      <p className="text-xs text-gray-400">{fmtDate(co.date_submitted)}</p>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="shrink-0 text-right">
-                <p className={`text-sm font-semibold tabular-nums ${
-                  co.amount_cents >= 0 ? 'text-gray-900' : 'text-red-700'
-                }`}>
-                  {co.amount_cents >= 0 ? '+' : ''}{formatMoney(co.amount_cents)}
-                </p>
-                {co.date_submitted && (
-                  <p className="text-xs text-gray-400">{fmtDate(co.date_submitted)}</p>
-                )}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -941,6 +1116,7 @@ function FinancialsSkeleton() {
 type FinancialModal =
   | { type: 'none' }
   | { type: 'create-co' }
+  | { type: 'edit-co'; co: ProjectChangeOrder }
   | { type: 'create-draw-schedule' }
   | { type: 'submit-draw' }
 
@@ -950,6 +1126,7 @@ export function FinancialsTab() {
   const { project, isLoading: projectLoading } = useOutletContext<OutletCtx>()
   const { activeTenantId, user } = useAuth()
   const queryClient = useQueryClient()
+  const toast = useToast()
 
   const jobId      = project?.job?.id
   const tenantId   = activeTenantId ?? ''
@@ -963,6 +1140,17 @@ export function FinancialsTab() {
   const [modal, setModal] = useState<FinancialModal>({ type: 'none' })
 
   const isLoading = projectLoading || cosLoading || drawLoading || invLoading
+
+  const withdrawMut = useMutation({
+    mutationFn: (co: ProjectChangeOrder) => withdrawChangeOrder(supabase, co.id),
+    onSuccess:  () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-change-orders', jobId] })
+      toast.success('Change order withdrawn to draft')
+    },
+    onError: (err) => {
+      toast.error('Failed to withdraw change order', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
 
   if (isLoading) {
     return <div className="px-5 py-6 lg:px-8"><FinancialsSkeleton /></div>
@@ -990,6 +1178,9 @@ export function FinancialsTab() {
       <ChangeOrdersSection
         changeOrders={cos}
         onAdd={() => setModal({ type: 'create-co' })}
+        onEdit={(co) => setModal({ type: 'edit-co', co })}
+        onWithdraw={(co) => withdrawMut.mutate(co)}
+        withdrawingId={withdrawMut.isPending ? (withdrawMut.variables?.id ?? null) : null}
       />
 
       <DrawScheduleSection
@@ -1009,6 +1200,14 @@ export function FinancialsTab() {
           jobId={jobId}
           userId={userId}
           nextCoNumber={nextCoNumber}
+          onClose={() => setModal({ type: 'none' })}
+          onSaved={refreshCOs}
+        />
+      )}
+
+      {modal.type === 'edit-co' && (
+        <EditCOModal
+          co={modal.co}
           onClose={() => setModal({ type: 'none' })}
           onSaved={refreshCOs}
         />

@@ -188,6 +188,8 @@ export interface ProjectChangeOrder {
   date_submitted: string | null
   approved_at: string | null
   schedule_impact_days: number | null
+  reason: string | null
+  notes: string | null
   created_at: string
 }
 
@@ -314,7 +316,7 @@ export async function getProjectChangeOrders(
     .select(`
       id, co_number, title, description, amount_cents,
       co_status, date_submitted, approved_at,
-      schedule_impact_days, created_at
+      schedule_impact_days, reason, notes, created_at
     `)
     .eq('job_id', jobId)
     .eq('tenant_id', tenantId)
@@ -965,6 +967,45 @@ export async function createChangeOrder(
     .single()
   if (error) throw error
   return data as { id: string }
+}
+
+// ── Update / withdraw change order ────────────────────────────────────────
+
+export interface UpdateChangeOrderInput {
+  co_number?: string
+  title?: string | null
+  description?: string | null
+  amount_cents?: number
+  /** Only editable for draft and pending_approval COs */
+  co_status?: string
+  date_submitted?: string | null
+  schedule_impact_days?: number | null
+  reason?: string | null
+  notes?: string | null
+}
+
+export async function updateChangeOrder(
+  client: SupabaseClient,
+  coId: string,
+  input: UpdateChangeOrderInput,
+): Promise<void> {
+  const { error } = await client
+    .from('job_change_orders')
+    .update({ ...input } as unknown as never)
+    .eq('id', coId)
+  if (error) throw error
+}
+
+/** Resets co_status back to 'draft', unlocking the CO for editing. */
+export async function withdrawChangeOrder(
+  client: SupabaseClient,
+  coId: string,
+): Promise<void> {
+  const { error } = await client
+    .from('job_change_orders')
+    .update({ co_status: 'draft' } as unknown as never)
+    .eq('id', coId)
+  if (error) throw error
 }
 
 // ── Draw schedule mutations ────────────────────────────────────────────────
