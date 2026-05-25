@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.generated.ts
+packages/db/src/types/database.types.ts

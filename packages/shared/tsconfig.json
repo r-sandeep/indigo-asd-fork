@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@indigo/shared": ["./src/index.ts"],
+      "@indigo/db": ["../db/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

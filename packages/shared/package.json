@@ -1,0 +1,22 @@
+{
+  "name": "@indigo/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./services": "./src/services/index.ts",
+    "./types": "./src/types/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@indigo/db": "workspace:*",
+    "@supabase/supabase-js": "^2.43.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

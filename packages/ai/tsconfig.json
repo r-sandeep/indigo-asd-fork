@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@indigo/ai": ["./src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
