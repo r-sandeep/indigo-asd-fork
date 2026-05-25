@@ -68,11 +68,82 @@ export interface PortalDocument {
   created_at: string
 }
 
+export interface PortalDailyLog {
+  id: string
+  date: string
+  weather: string | null
+  temperature_f: number | null
+  crew_count: number | null
+  hours_worked: number | null
+  work_performed: string
+  /** AI-drafted client-friendly summary — shown preferentially over work_performed */
+  ai_client_summary: string | null
+  materials_delivered: string | null
+  equipment_used: string | null
+  issues_or_delays: string | null
+  published_at: string | null
+  created_at: string
+}
+
+export interface PortalChangeOrder {
+  id: string
+  co_number: string
+  title: string | null
+  description: string
+  amount_cents: number
+  co_status: string | null
+  date_submitted: string | null
+  approved_at: string | null
+  schedule_impact_days: number | null
+  created_at: string
+}
+
+export interface PortalSelectionOption {
+  id: string
+  name: string
+  description: string | null
+  sku: string | null
+  vendor: string | null
+  vendor_url: string | null
+  unit_price_cents: number
+  lead_time_days: number | null
+  sequence: number
+  is_active: boolean
+}
+
+export interface PortalClientSelection {
+  id: string
+  category_id: string
+  option_id: string | null
+  custom_description: string | null
+  custom_vendor: string | null
+  custom_price_cents: number | null
+  notes: string | null
+  selected_at: string | null
+  approved_at: string | null
+}
+
+export interface PortalSelectionCategory {
+  id: string
+  name: string
+  description: string | null
+  allowance_cents: number
+  status: string
+  due_date: string | null
+  sequence: number
+  notes: string | null
+  options: PortalSelectionOption[]
+  /** The client's current selection for this category, or null if not yet chosen */
+  selection: PortalClientSelection | null
+}
+
 export interface PortalProjectData {
   project: PortalProject
   milestones: PortalMilestone[]
   invoices: PortalInvoice[]
   documents: PortalDocument[]
+  dailyLogs: PortalDailyLog[]
+  changeOrders: PortalChangeOrder[]
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────
@@ -107,6 +178,46 @@ export async function approvePortalMilestone(
     'portal_approve_milestone',
     { p_milestone_id: milestoneId } as unknown as never,
   )
+  if (error) throw error
+}
+
+export interface UpsertPortalSelectionInput {
+  categoryId: string
+  projectId: string
+  tenantId: string
+  customerId: string
+  optionId: string | null
+  customDescription?: string | null
+  customVendor?: string | null
+  notes?: string | null
+}
+
+/**
+ * Creates or updates the client's selection for a category.
+ * client_selections has a UNIQUE constraint on category_id, so upserting
+ * on that column is safe — one selection per category per project.
+ */
+export async function upsertPortalSelection(
+  client: SupabaseClient,
+  input: UpsertPortalSelectionInput,
+): Promise<void> {
+  const { error } = await client
+    .from('client_selections')
+    .upsert(
+      {
+        category_id:        input.categoryId,
+        project_id:         input.projectId,
+        tenant_id:          input.tenantId,
+        customer_id:        input.customerId,
+        option_id:          input.optionId,
+        custom_description: input.customDescription ?? null,
+        custom_vendor:      input.customVendor ?? null,
+        notes:              input.notes ?? null,
+        selected_at:        new Date().toISOString(),
+      } as unknown as never,
+      { onConflict: 'category_id' },
+    )
+
   if (error) throw error
 }
 
@@ -164,7 +275,8 @@ export async function getPortalProjectData(
   client: SupabaseClient,
   projectId: string,
 ): Promise<PortalProjectData> {
-  const [projectRes, milestonesRes, docsRes] = await Promise.all([
+  // Parallel: project + client-visible milestones + client-visible documents + daily logs
+  const [projectRes, milestonesRes, docsRes, logsRes] = await Promise.all([
     client
       .from('projects')
       .select(`
@@ -191,28 +303,96 @@ export async function getPortalProjectData(
       .eq('project_id', projectId)
       .eq('is_client_visible', true)
       .order('created_at', { ascending: false }),
+    client
+      .from('daily_logs')
+      .select('id, date, weather, temperature_f, crew_count, hours_worked, work_performed, ai_client_summary, materials_delivered, equipment_used, issues_or_delays, published_at, created_at')
+      .eq('project_id', projectId)
+      .eq('is_client_visible', true)
+      .not('published_at', 'is', null)
+      .order('date', { ascending: false }),
   ])
 
-  if (projectRes.error) throw projectRes.error
+  if (projectRes.error)    throw projectRes.error
   if (milestonesRes.error) throw milestonesRes.error
-  if (docsRes.error) throw docsRes.error
+  if (docsRes.error)       throw docsRes.error
+  if (logsRes.error)       throw logsRes.error
 
   const project = projectRes.data as PortalProject
 
-  // Fetch invoices via job_id
-  const { data: invoices, error: invError } = await client
-    .from('invoices')
-    .select('id, invoice_number, invoice_date, due_date, invoice_status, total_cents, amount_paid_cents, balance_due_cents, sent_at, paid_at')
-    .eq('job_id', project.job_id)
-    .neq('invoice_status', 'void')
-    .order('invoice_date', { ascending: false })
+  // Serial: invoices + change orders both require job_id from project
+  const [invoicesRes, cosRes] = await Promise.all([
+    client
+      .from('invoices')
+      .select('id, invoice_number, invoice_date, due_date, invoice_status, total_cents, amount_paid_cents, balance_due_cents, sent_at, paid_at')
+      .eq('job_id', project.job_id)
+      .neq('invoice_status', 'void')
+      .order('invoice_date', { ascending: false }),
+    client
+      .from('job_change_orders')
+      .select('id, co_number, title, description, amount_cents, co_status, date_submitted, approved_at, schedule_impact_days, created_at')
+      .eq('job_id', project.job_id)
+      .in('co_status', ['pending_approval', 'approved'])
+      .order('created_at', { ascending: true }),
+  ])
 
-  if (invError) throw invError
+  if (invoicesRes.error) throw invoicesRes.error
+  if (cosRes.error)      throw cosRes.error
 
   return {
     project,
-    milestones: (milestonesRes.data ?? []) as PortalMilestone[],
-    invoices:   (invoices       ?? []) as PortalInvoice[],
-    documents:  (docsRes.data   ?? []) as PortalDocument[],
+    milestones:   (milestonesRes.data ?? []) as PortalMilestone[],
+    invoices:     (invoicesRes.data  ?? []) as PortalInvoice[],
+    documents:    (docsRes.data      ?? []) as PortalDocument[],
+    dailyLogs:    (logsRes.data      ?? []) as PortalDailyLog[],
+    changeOrders: (cosRes.data       ?? []) as PortalChangeOrder[],
   }
+}
+
+/**
+ * Fetches all client-visible selection categories for a project, with their
+ * options and the customer's existing selection merged in.
+ */
+export async function getPortalSelections(
+  client: SupabaseClient,
+  projectId: string,
+  customerId: string,
+): Promise<PortalSelectionCategory[]> {
+  const [categoriesRes, selectionsRes] = await Promise.all([
+    client
+      .from('selection_categories')
+      .select(`
+        id, name, description, allowance_cents, status, due_date, sequence, notes,
+        options:selection_options (
+          id, name, description, sku, vendor, vendor_url,
+          unit_price_cents, lead_time_days, sequence, is_active
+        )
+      `)
+      .eq('project_id', projectId)
+      .eq('is_client_visible', true)
+      .order('sequence', { ascending: true }),
+    client
+      .from('client_selections')
+      .select('id, category_id, option_id, custom_description, custom_vendor, custom_price_cents, notes, selected_at, approved_at')
+      .eq('project_id', projectId)
+      .eq('customer_id', customerId),
+  ])
+
+  if (categoriesRes.error)  throw categoriesRes.error
+  if (selectionsRes.error)  throw selectionsRes.error
+
+  // Index existing selections by category_id for O(1) merge
+  const selectionMap = new Map<string, PortalClientSelection>()
+  for (const s of (selectionsRes.data ?? []) as PortalClientSelection[]) {
+    selectionMap.set(s.category_id, s)
+  }
+
+  return ((categoriesRes.data ?? []) as (Omit<PortalSelectionCategory, 'selection' | 'options'> & { options: PortalSelectionOption[] })[]).map(
+    (cat) => ({
+      ...cat,
+      options: (cat.options ?? [])
+        .filter((o) => o.is_active)
+        .sort((a, b) => a.sequence - b.sequence),
+      selection: selectionMap.get(cat.id) ?? null,
+    }),
+  )
 }
