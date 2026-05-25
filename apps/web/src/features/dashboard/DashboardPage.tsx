@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom'
+import { formatMoney } from '@indigo/shared'
 import { useAuth } from '@/hooks/useAuth'
 import { useDashboardStats } from './useDashboardStats'
+import { useProjects } from '@/features/projects/useProjects'
 import { SkeletonCard } from '@/components/ui/Skeleton'
+import { StatusBadge, TypeBadge } from '@/components/ui/Badge'
 
 function greeting() {
   const h = new Date().getHours()
@@ -45,6 +48,8 @@ function StatCard({ label, value, icon, loading, href }: StatCardProps) {
 export function DashboardPage() {
   const { profile } = useAuth()
   const { stats, isLoading } = useDashboardStats()
+  const { data: projects, isLoading: projectsLoading } = useProjects()
+  const recentProjects = projects?.slice(0, 3) ?? []
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -93,9 +98,44 @@ export function DashboardPage() {
           </Link>
         </div>
         <div className="space-y-3">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
+          {projectsLoading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : recentProjects.length === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-400">No projects yet.</p>
+          ) : (
+            recentProjects.map((project) => {
+              const job = project.job!
+              const contractCents = job.current_contract_cents ?? job.contract_value_cents
+              const location = [job.city, job.state].filter(Boolean).join(', ')
+              return (
+                <Link
+                  key={project.id}
+                  to={`/projects/${project.id}`}
+                  className="block rounded-xl border border-gray-200 bg-white p-4 shadow-card transition-shadow hover:shadow-panel"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-gray-900">{job.job_name}</span>
+                        {job.project_type && <TypeBadge type={job.project_type} />}
+                      </div>
+                      <p className="mt-0.5 font-mono text-xs text-gray-400">{job.job_number}{location ? ` · ${location}` : ''}</p>
+                    </div>
+                    <StatusBadge status={job.project_status ?? ''} />
+                  </div>
+                  {contractCents != null && (
+                    <p className="mt-3 text-sm font-semibold tabular-nums text-gray-700">
+                      {formatMoney(contractCents)}
+                    </p>
+                  )}
+                </Link>
+              )
+            })
+          )}
         </div>
       </div>
     </div>
