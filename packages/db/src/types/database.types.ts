@@ -185,7 +185,10 @@ export interface JobChangeOrder {
   amount_cents: number
   date_submitted: string | null
   date_approved: string | null
+  /** BB-owned — has check constraint. Default 'Pending'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'void' */
+  co_status: string | null
   notes: string
   title: string | null
   reason: string | null
@@ -211,7 +214,10 @@ export interface Invoice {
   job_id: string | null
   invoice_date: string
   due_date: string
+  /** BB-owned — has check constraint. Default 'Draft'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'draft' | 'sent' | 'viewed' | 'partial' | 'paid' | 'overdue' | 'void' */
+  invoice_status: string | null
   subtotal_cents: number
   tax_rate_basis_points: number
   tax_amount_cents: number
@@ -282,7 +288,10 @@ export interface Expense {
   total_cents: number
   payment_method: string
   reference_number: string
+  /** BB-owned — has check constraint. Default 'Draft'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'draft' | 'submitted' | 'approved' | 'paid' | 'rejected' */
+  expense_status: string | null
   receipt_url: string
   notes: string
   journal_entry_id: string | null
@@ -352,7 +361,10 @@ export interface Subcontractor {
   w9_on_file: boolean
   is_1099_eligible: boolean
   ein_tax_id: string
+  /** BB-owned — has check constraint. Default 'Active'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'active' | 'inactive' | 'pending_review' */
+  subcontractor_status: string | null
   notes: string
   license_state: string | null
   license_expiry: string | null
@@ -375,7 +387,10 @@ export interface Subcontract {
   reference_number: string
   execution_date: string | null
   original_value_cents: number
+  /** BB-owned — has check constraint. Default 'Draft'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'draft' | 'sent' | 'active' | 'complete' | 'cancelled' */
+  subcontract_status: string | null
   notes: string
   contract_document_url: string
   contract_document_name: string
@@ -395,9 +410,15 @@ export interface SubcontractInvoice {
   billing_period_to: string | null
   milestone_description: string
   amount_billed_cents: number
+  /** BB-owned — has check constraint. Default 'Received'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'received' | 'reviewing' | 'approved' | 'paid' | 'disputed' */
+  sub_invoice_status: string | null
   payment_date: string | null
+  /** BB-owned — has check constraint. Default 'None'. Do not set from Indigo. */
   lien_waiver_status: string
+  /** Indigo: 'none' | 'requested' | 'received_conditional' | 'received_unconditional' | 'approved' */
+  lien_waiver_review_status: string | null
   notes: string
   lien_waiver_document_url: string
   lien_waiver_document_name: string
@@ -416,7 +437,10 @@ export interface SubcontractChangeOrder {
   amount_cents: number
   date_submitted: string | null
   date_approved: string | null
+  /** BB-owned — has check constraint. Default 'Pending'. Do not set from Indigo. */
   status: string
+  /** Indigo lifecycle: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'void' */
+  sub_co_status: string | null
   notes: string
   created_at: string
 }

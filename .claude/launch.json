@@ -1,17 +1,1 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "web",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "dev"],
-      "port": 5173
-    },
-    {
-      "name": "portal",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "portal", "dev"],
-      "port": 5174
-    }
-  ]
-}
+{"version":"0.0.1","configurations":[{"name":"web","runtimeExecutable":"pnpm","runtimeArgs":["--filter","web","dev"],"port":5173}]}
