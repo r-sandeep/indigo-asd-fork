@@ -1,4 +1,4 @@
-import { useOutletContext, useParams } from 'react-router-dom'
+import { useOutletContext } from 'react-router-dom'
 import type { ProjectRow, ProjectChangeOrder, ProjectDrawRequest, ProjectDrawSchedule, ProjectInvoice } from '@indigo/shared'
 import { formatMoney } from '@indigo/shared'
 import {
@@ -7,7 +7,7 @@ import {
   useProjectInvoices,
 } from '../useProject'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { ExclamationTriangleIcon, CalendarIcon } from '@/components/ui/Icons'
+import { ExclamationTriangleIcon } from '@/components/ui/Icons'
 
 interface OutletCtx {
   project: ProjectRow | undefined
@@ -21,17 +21,6 @@ function fmtDate(s: string | null | undefined): string {
   return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function fmtPct(n: number | null | undefined): string {
-  if (n == null) return '—'
-  return `${n}%`
-}
-
-function fmtBytes(n: number | null | undefined): string {
-  if (!n) return ''
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
 
 // ── Status configs ─────────────────────────────────────────────────────────
 
@@ -442,7 +431,6 @@ function FinancialsSkeleton() {
 // ── Main component ─────────────────────────────────────────────────────────
 
 export function FinancialsTab() {
-  const { id: projectId } = useParams<{ id: string }>()
   const { project, isLoading: projectLoading } = useOutletContext<OutletCtx>()
 
   const jobId = project?.job?.id

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useOutletContext, useParams } from 'react-router-dom'
-import type { ProjectRow, ProjectDocument, ProjectDocumentFolder } from '@indigo/shared'
+import type { ProjectRow, ProjectDocument } from '@indigo/shared'
 import { useProjectDocuments } from '../useProject'
 import { Skeleton } from '@/components/ui/Skeleton'
 
