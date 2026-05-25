@@ -6,6 +6,9 @@ import {
   getProjectDrawSchedule,
   getProjectInvoices,
   getProjectDocuments,
+  getProjectFieldData,
+  getProjectSubcontracts,
+  getProjectLienWaivers,
 } from '@indigo/shared'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
@@ -69,6 +72,39 @@ export function useProjectDocuments(projectId: string | undefined) {
   return useQuery({
     queryKey:  ['project-documents', projectId],
     queryFn:   () => getProjectDocuments(supabase, projectId!, activeTenantId!),
+    enabled:   !!projectId && !!activeTenantId,
+    staleTime: 60_000,
+  })
+}
+
+export function useProjectFieldData(projectId: string | undefined) {
+  const { activeTenantId } = useAuth()
+
+  return useQuery({
+    queryKey:  ['project-field', projectId],
+    queryFn:   () => getProjectFieldData(supabase, projectId!, activeTenantId!),
+    enabled:   !!projectId && !!activeTenantId,
+    staleTime: 60_000,
+  })
+}
+
+export function useProjectSubcontracts(jobId: string | undefined) {
+  const { activeTenantId } = useAuth()
+
+  return useQuery({
+    queryKey:  ['project-subcontracts', jobId],
+    queryFn:   () => getProjectSubcontracts(supabase, jobId!, activeTenantId!),
+    enabled:   !!jobId && !!activeTenantId,
+    staleTime: 60_000,
+  })
+}
+
+export function useProjectLienWaivers(projectId: string | undefined) {
+  const { activeTenantId } = useAuth()
+
+  return useQuery({
+    queryKey:  ['project-lien-waivers', projectId],
+    queryFn:   () => getProjectLienWaivers(supabase, projectId!, activeTenantId!),
     enabled:   !!projectId && !!activeTenantId,
     staleTime: 60_000,
   })

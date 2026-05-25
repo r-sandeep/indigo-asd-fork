@@ -408,3 +408,207 @@ export async function getProjectDocuments(
     documents: (docsRes.data ?? []) as ProjectDocument[],
   }
 }
+
+// ── Field types ────────────────────────────────────────────────────────────
+
+export interface ProjectRfi {
+  id: string
+  number: number
+  subject: string
+  question: string
+  answer: string | null
+  status: string
+  priority: string
+  due_date: string | null
+  submitted_at: string | null
+  answered_at: string | null
+  cost_impact_cents: number | null
+  schedule_impact_days: number | null
+  created_at: string
+}
+
+export interface ProjectPunchItem {
+  id: string
+  title: string
+  description: string | null
+  location: string | null
+  trade: string | null
+  priority: string
+  status: string
+  due_date: string | null
+  closed_at: string | null
+  created_at: string
+}
+
+export interface ProjectSubmittal {
+  id: string
+  number: string
+  title: string
+  type: string | null
+  spec_section: string | null
+  status: string
+  revision: number
+  required_by: string | null
+  submitted_at: string | null
+  reviewed_at: string | null
+  review_notes: string | null
+  created_at: string
+}
+
+export interface ProjectDailyLog {
+  id: string
+  date: string
+  weather: string | null
+  temperature_f: number | null
+  crew_count: number | null
+  hours_worked: number | null
+  work_performed: string
+  materials_delivered: string | null
+  equipment_used: string | null
+  issues_or_delays: string | null
+  is_client_visible: boolean
+  published_at: string | null
+  created_at: string
+}
+
+// ── Subs types ─────────────────────────────────────────────────────────────
+
+export interface ProjectSubcontractInvoice {
+  id: string
+  sub_invoice_number: string
+  invoice_date: string
+  milestone_description: string
+  amount_billed_cents: number
+  sub_invoice_status: string | null
+  lien_waiver_review_status: string | null
+  payment_date: string | null
+  notes: string
+}
+
+export interface ProjectSubcontract {
+  id: string
+  reference_number: string
+  description: string
+  execution_date: string | null
+  original_value_cents: number
+  subcontract_status: string | null
+  created_at: string
+  subcontractor: {
+    id: string
+    name: string
+    contact_name: string
+    email: string
+    phone: string
+    subcontractor_status: string | null
+    coi_expiration: string | null
+    license_expiration: string | null
+    is_preferred: boolean
+  } | null
+  subcontract_invoices: ProjectSubcontractInvoice[]
+}
+
+export interface ProjectLienWaiver {
+  id: string
+  type: string
+  amount_cents: number
+  through_date: string
+  received_at: string | null
+  created_at: string
+  subcontractor: { id: string; name: string } | null
+}
+
+// ── Field queries ──────────────────────────────────────────────────────────
+
+export async function getProjectFieldData(
+  client: SupabaseClient,
+  projectId: string,
+  tenantId: string,
+) {
+  const [rfisRes, punchRes, submittalsRes, logsRes] = await Promise.all([
+    client
+      .from('rfis')
+      .select('id, number, subject, question, answer, status, priority, due_date, submitted_at, answered_at, cost_impact_cents, schedule_impact_days, created_at')
+      .eq('project_id', projectId)
+      .eq('tenant_id', tenantId)
+      .order('number', { ascending: false }),
+    client
+      .from('punch_list_items')
+      .select('id, title, description, location, trade, priority, status, due_date, closed_at, created_at')
+      .eq('project_id', projectId)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false }),
+    client
+      .from('submittals')
+      .select('id, number, title, type, spec_section, status, revision, required_by, submitted_at, reviewed_at, review_notes, created_at')
+      .eq('project_id', projectId)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false }),
+    client
+      .from('daily_logs')
+      .select('id, date, weather, temperature_f, crew_count, hours_worked, work_performed, materials_delivered, equipment_used, issues_or_delays, is_client_visible, published_at, created_at')
+      .eq('project_id', projectId)
+      .eq('tenant_id', tenantId)
+      .order('date', { ascending: false }),
+  ])
+
+  if (rfisRes.error) throw rfisRes.error
+  if (punchRes.error) throw punchRes.error
+  if (submittalsRes.error) throw submittalsRes.error
+  if (logsRes.error) throw logsRes.error
+
+  return {
+    rfis:       (rfisRes.data       ?? []) as ProjectRfi[],
+    punchItems: (punchRes.data      ?? []) as ProjectPunchItem[],
+    submittals: (submittalsRes.data ?? []) as ProjectSubmittal[],
+    dailyLogs:  (logsRes.data       ?? []) as ProjectDailyLog[],
+  }
+}
+
+// ── Subs queries ───────────────────────────────────────────────────────────
+
+export async function getProjectSubcontracts(
+  client: SupabaseClient,
+  jobId: string,
+  tenantId: string,
+): Promise<ProjectSubcontract[]> {
+  const { data, error } = await client
+    .from('subcontracts')
+    .select(`
+      id, reference_number, description, execution_date,
+      original_value_cents, subcontract_status, created_at,
+      subcontractor:subcontractors (
+        id, name, contact_name, email, phone,
+        subcontractor_status, coi_expiration, license_expiration, is_preferred
+      ),
+      subcontract_invoices (
+        id, sub_invoice_number, invoice_date, milestone_description,
+        amount_billed_cents, sub_invoice_status, lien_waiver_review_status,
+        payment_date, notes
+      )
+    `)
+    .eq('job_id', jobId)
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  return (data ?? []) as unknown as ProjectSubcontract[]
+}
+
+export async function getProjectLienWaivers(
+  client: SupabaseClient,
+  projectId: string,
+  tenantId: string,
+): Promise<ProjectLienWaiver[]> {
+  const { data, error } = await client
+    .from('lien_waivers')
+    .select(`
+      id, type, amount_cents, through_date, received_at, created_at,
+      subcontractor:subcontractors (id, name)
+    `)
+    .eq('project_id', projectId)
+    .eq('tenant_id', tenantId)
+    .order('through_date', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as unknown as ProjectLienWaiver[]
+}

@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { queryClient } from '@/lib/queryClient'
 import { useAuthListener, useAuth } from '@/hooks/useAuth'
+import { usePortalAuthListener, usePortalAuth } from '@/hooks/usePortalAuth'
 import { AppShell } from '@/components/AppShell'
 import { ToastProvider } from '@/components/ui/Toast'
 import { LoginPage } from '@/features/auth/LoginPage'
@@ -13,6 +14,14 @@ import { OverviewTab } from '@/features/projects/tabs/OverviewTab'
 import { ScheduleTab } from '@/features/projects/tabs/ScheduleTab'
 import { FinancialsTab } from '@/features/projects/tabs/FinancialsTab'
 import { DocumentsTab } from '@/features/projects/tabs/DocumentsTab'
+import { FieldTab } from '@/features/projects/tabs/FieldTab'
+import { SubsTab } from '@/features/projects/tabs/SubsTab'
+import { PortalLoginPage } from '@/features/portal/PortalLoginPage'
+import { PortalShell } from '@/features/portal/PortalShell'
+import { PortalProjectsPage } from '@/features/portal/PortalProjectsPage'
+import { PortalProjectPage } from '@/features/portal/PortalProjectPage'
+
+// ── Staff auth guard ───────────────────────────────────────────────────────
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
@@ -44,8 +53,8 @@ function AuthRoutes() {
           <Route path="schedule"      element={<ScheduleTab />} />
           <Route path="financials"    element={<FinancialsTab />} />
           <Route path="documents"     element={<DocumentsTab />} />
-          <Route path="field"         element={<ComingSoon name="Field" />} />
-          <Route path="subs"          element={<ComingSoon name="Subcontractors" />} />
+          <Route path="field"         element={<FieldTab />} />
+          <Route path="subs"          element={<SubsTab />} />
         </Route>
 
         <Route path="schedule"        element={<ComingSoon name="Schedule" />} />
@@ -59,6 +68,55 @@ function AuthRoutes() {
     </Routes>
   )
 }
+
+// ── Portal auth guard ──────────────────────────────────────────────────────
+
+function RequirePortalAuth({ children }: { children: React.ReactNode }) {
+  const { user, customer, isLoading } = usePortalAuth()
+  if (isLoading) return null
+  if (!user) return <Navigate to="/portal/login" replace />
+  if (!customer) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-sm text-center">
+          <div className="text-4xl">🔒</div>
+          <h2 className="mt-4 text-base font-semibold text-gray-900">No portal access</h2>
+          <p className="mt-2 text-sm text-gray-500">
+            Your email isn't linked to a client account. Please contact your builder.
+          </p>
+        </div>
+      </div>
+    )
+  }
+  return <>{children}</>
+}
+
+function PortalRoutes() {
+  usePortalAuthListener()
+  const { user } = usePortalAuth()
+
+  return (
+    <Routes>
+      <Route
+        path="login"
+        element={user ? <Navigate to="/portal" replace /> : <PortalLoginPage />}
+      />
+      <Route
+        element={
+          <RequirePortalAuth>
+            <PortalShell />
+          </RequirePortalAuth>
+        }
+      >
+        <Route index                   element={<PortalProjectsPage />} />
+        <Route path="projects"         element={<PortalProjectsPage />} />
+        <Route path="projects/:id"     element={<PortalProjectPage />} />
+      </Route>
+    </Routes>
+  )
+}
+
+// ── Shared coming-soon placeholder ────────────────────────────────────────
 
 function ComingSoon({ name }: { name: string }) {
   return (
@@ -74,11 +132,18 @@ function ComingSoon({ name }: { name: string }) {
   )
 }
 
+// ── Root ───────────────────────────────────────────────────────────────────
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <AuthRoutes />
+        <Routes>
+          {/* Customer portal — separate auth context */}
+          <Route path="/portal/*" element={<PortalRoutes />} />
+          {/* Staff app */}
+          <Route path="/*" element={<AuthRoutes />} />
+        </Routes>
         <ToastProvider />
       </BrowserRouter>
       {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
