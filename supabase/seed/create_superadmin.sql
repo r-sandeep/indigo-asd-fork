@@ -95,10 +95,10 @@ BEGIN
   -- 4. Create tenant_member with owner role
   -- -------------------------------------------------------------------
   INSERT INTO public.tenant_members (
-    id, tenant_id, user_id, role, is_active, joined_at, created_at, updated_at
+    id, tenant_id, user_id, role, is_active, created_at, updated_at
   ) VALUES (
     gen_random_uuid(), v_tenant_id, v_user_id,
-    'owner', true, now(), now(), now()
+    'owner', true, now(), now()
   )
   ON CONFLICT (tenant_id, user_id) DO UPDATE
     SET role      = 'owner',
