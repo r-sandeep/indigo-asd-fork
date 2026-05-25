@@ -1,0 +1,109 @@
+table_name,column_name,data_type,is_nullable
+jobs,id,uuid,NO
+jobs,tenant_id,uuid,NO
+jobs,job_number,text,NO
+jobs,job_name,text,NO
+jobs,customer_id,uuid,NO
+jobs,status,text,NO
+jobs,job_type,text,NO
+jobs,start_date,date,YES
+jobs,end_date,date,YES
+jobs,contract_amount_cents,integer,NO
+jobs,description,text,NO
+jobs,job_address,text,NO
+jobs,notes,text,NO
+jobs,created_at,timestamp with time zone,NO
+jobs,updated_at,timestamp with time zone,NO
+jobs,project_type,text,YES
+jobs,address_line1,text,YES
+jobs,address_line2,text,YES
+jobs,city,text,YES
+jobs,state,text,YES
+jobs,zip,text,YES
+jobs,apn,text,YES
+jobs,target_completion,date,YES
+jobs,actual_completion,date,YES
+jobs,contract_value_cents,bigint,YES
+jobs,current_contract_cents,bigint,YES
+jobs,permit_number,text,YES
+jobs,permit_issued_date,date,YES
+jobs,permit_expiry_date,date,YES
+jobs,has_construction_loan,boolean,NO
+jobs,lender_name,text,YES
+jobs,loan_amount_cents,bigint,YES
+jobs,pm_user_id,uuid,YES
+jobs,superintendent_user_id,uuid,YES
+jobs,package_name,text,YES
+jobs,tags,ARRAY,NO
+jobs,internal_notes,text,YES
+milestones,id,uuid,NO
+milestones,project_id,uuid,NO
+milestones,tenant_id,uuid,NO
+milestones,phase_id,uuid,YES
+milestones,name,text,NO
+milestones,description,text,YES
+milestones,due_date,date,YES
+milestones,completed_date,date,YES
+milestones,status,USER-DEFINED,NO
+milestones,sequence,integer,NO
+milestones,is_client_visible,boolean,NO
+milestones,requires_client_approval,boolean,NO
+milestones,client_approved_at,timestamp with time zone,YES
+milestones,client_approved_by,uuid,YES
+milestones,triggers_draw_request,boolean,NO
+milestones,triggers_invoice,boolean,NO
+milestones,linked_draw_id,uuid,YES
+milestones,linked_invoice_id,uuid,YES
+milestones,created_at,timestamp with time zone,NO
+milestones,updated_at,timestamp with time zone,NO
+project_phases,id,uuid,NO
+project_phases,project_id,uuid,NO
+project_phases,tenant_id,uuid,NO
+project_phases,name,text,NO
+project_phases,sequence,integer,NO
+project_phases,start_date,date,YES
+project_phases,end_date,date,YES
+project_phases,status,USER-DEFINED,NO
+project_phases,color,text,YES
+project_phases,description,text,YES
+project_phases,created_at,timestamp with time zone,NO
+project_phases,updated_at,timestamp with time zone,NO
+projects,id,uuid,NO
+projects,tenant_id,uuid,NO
+projects,job_id,uuid,NO
+projects,created_by,uuid,YES
+projects,created_at,timestamp with time zone,NO
+projects,updated_at,timestamp with time zone,NO
+schedule_items,id,uuid,NO
+schedule_items,project_id,uuid,NO
+schedule_items,tenant_id,uuid,NO
+schedule_items,phase_id,uuid,YES
+schedule_items,milestone_id,uuid,YES
+schedule_items,type,USER-DEFINED,NO
+schedule_items,name,text,NO
+schedule_items,description,text,YES
+schedule_items,planned_start,date,YES
+schedule_items,planned_end,date,YES
+schedule_items,actual_start,date,YES
+schedule_items,actual_end,date,YES
+schedule_items,duration_days,integer,YES
+schedule_items,assigned_to,uuid,YES
+schedule_items,assigned_trade,text,YES
+schedule_items,subcontractor_id,uuid,YES
+schedule_items,status,USER-DEFINED,NO
+schedule_items,percent_complete,integer,NO
+schedule_items,sequence,integer,NO
+schedule_items,indent_level,integer,NO
+schedule_items,is_collapsed,boolean,NO
+schedule_items,color,text,YES
+schedule_items,created_at,timestamp with time zone,NO
+schedule_items,updated_at,timestamp with time zone,NO
+tenant_members,id,uuid,NO
+tenant_members,tenant_id,uuid,NO
+tenant_members,user_id,uuid,NO
+tenant_members,role,USER-DEFINED,NO
+tenant_members,is_active,boolean,NO
+tenant_members,invited_by,uuid,YES
+tenant_members,invited_at,timestamp with time zone,YES
+tenant_members,accepted_at,timestamp with time zone,YES
+tenant_members,created_at,timestamp with time zone,NO
