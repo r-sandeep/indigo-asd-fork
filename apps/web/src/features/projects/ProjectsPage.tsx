@@ -2,9 +2,9 @@ import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '@indigo/shared'
 import { useProjects } from './useProjects'
+import { CreateProjectModal } from './CreateProjectModal'
 import { StatusBadge, TypeBadge } from '@/components/ui/Badge'
 import { SkeletonProjectRow } from '@/components/ui/Skeleton'
-import { useToast } from '@/stores/toastStore'
 import {
   MagnifyingGlassIcon,
   PlusIcon,
@@ -41,7 +41,7 @@ function formatDate(dateStr: string | null | undefined): string | null {
 
 export function ProjectsPage() {
   const { data: projects, isLoading, error } = useProjects()
-  const toast = useToast()
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [search, setSearch]           = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
@@ -90,7 +90,7 @@ export function ProjectsPage() {
           </div>
 
           <button
-            onClick={() => toast.info('Coming in Phase 2', 'Project creation will be available soon.')}
+            onClick={() => setShowCreateModal(true)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             <PlusIcon className="h-4 w-4" strokeWidth={2.5} />
@@ -138,6 +138,11 @@ export function ProjectsPage() {
         </div>
       </div>
 
+      {/* Create project modal */}
+      {showCreateModal && (
+        <CreateProjectModal onClose={() => setShowCreateModal(false)} />
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-y-auto bg-surface-1 pb-24 lg:pb-0">
         {isLoading ? (
@@ -151,7 +156,11 @@ export function ProjectsPage() {
         ) : error ? (
           <ErrorState />
         ) : filtered.length === 0 ? (
-          <EmptyState hasProjects={!!projects?.length} searchActive={!!search || statusFilter !== 'all'} />
+          <EmptyState
+            hasProjects={!!projects?.length}
+            searchActive={!!search || statusFilter !== 'all'}
+            onNewProject={() => setShowCreateModal(true)}
+          />
         ) : (
           <div className="mx-auto max-w-4xl px-5 pt-4 lg:px-8">
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
@@ -232,9 +241,15 @@ export function ProjectsPage() {
   )
 }
 
-function EmptyState({ hasProjects, searchActive }: { hasProjects: boolean; searchActive: boolean }) {
-  const toast = useToast()
-
+function EmptyState({
+  hasProjects,
+  searchActive,
+  onNewProject,
+}: {
+  hasProjects: boolean
+  searchActive: boolean
+  onNewProject: () => void
+}) {
   if (searchActive) {
     return (
       <div className="flex h-64 items-center justify-center p-6">
@@ -263,7 +278,7 @@ function EmptyState({ hasProjects, searchActive }: { hasProjects: boolean; searc
         </p>
         {!hasProjects && (
           <button
-            onClick={() => toast.info('Coming in Phase 2', 'Project creation will be available soon.')}
+            onClick={onNewProject}
             className="mt-6 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700"
           >
             <PlusIcon className="h-4 w-4" strokeWidth={2.5} />

@@ -612,3 +612,96 @@ export async function getProjectLienWaivers(
   if (error) throw error
   return (data ?? []) as unknown as ProjectLienWaiver[]
 }
+
+// ── Customer lookup ────────────────────────────────────────────────────────
+
+export interface CustomerListItem {
+  id: string
+  customer_name: string
+  email: string
+}
+
+export async function getCustomers(
+  client: SupabaseClient,
+  tenantId: string,
+): Promise<CustomerListItem[]> {
+  const { data, error } = await client
+    .from('customers')
+    .select('id, customer_name, email')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .order('customer_name', { ascending: true })
+
+  if (error) throw error
+  return (data ?? []) as CustomerListItem[]
+}
+
+// ── Create project ─────────────────────────────────────────────────────────
+
+export interface CreateProjectInput {
+  job_name: string
+  job_number: string
+  customer_id: string
+  project_status?: string
+  project_type?: string
+  address_line1?: string
+  city?: string
+  state?: string
+  zip?: string
+  start_date?: string
+  target_completion?: string
+  contract_value_cents?: number
+  description?: string
+}
+
+export async function createProject(
+  client: SupabaseClient,
+  tenantId: string,
+  userId: string,
+  input: CreateProjectInput,
+): Promise<{ projectId: string; jobId: string }> {
+  // CRITICAL: Never set jobs.status or jobs.job_type — BB-owned fields with
+  // check constraints (jobs_status_check, jobs_job_type_check). Let them default.
+  const { data: job, error: jobError } = await client
+    .from('jobs')
+    .insert({
+      tenant_id:              tenantId,
+      job_number:             input.job_number,
+      job_name:               input.job_name,
+      customer_id:            input.customer_id,
+      project_status:         input.project_status         ?? 'bidding',
+      project_type:           input.project_type           ?? null,
+      address_line1:          input.address_line1          ?? null,
+      city:                   input.city                   ?? null,
+      state:                  input.state                  ?? null,
+      zip:                    input.zip                    ?? null,
+      start_date:             input.start_date             ?? null,
+      target_completion:      input.target_completion      ?? null,
+      contract_value_cents:   input.contract_value_cents   ?? null,
+      current_contract_cents: input.contract_value_cents   ?? null,
+      description:            input.description            ?? '',
+    } as unknown as never)
+    .select('id')
+    .single()
+
+  if (jobError) throw jobError
+
+  const jobId = (job as { id: string }).id
+
+  const { data: project, error: projectError } = await client
+    .from('projects')
+    .insert({
+      tenant_id:  tenantId,
+      job_id:     jobId,
+      created_by: userId,
+    } as unknown as never)
+    .select('id')
+    .single()
+
+  if (projectError) throw projectError
+
+  return {
+    jobId,
+    projectId: (project as { id: string }).id,
+  }
+}
