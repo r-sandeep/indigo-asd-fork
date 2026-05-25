@@ -5,6 +5,7 @@ export type {
   InsightSeverity, InsightType, LienWaiverType, MemberRole,
   PhaseStatus, PoStatus, PunchPriority, PunchStatus, RfiStatus,
   ScheduleItemType, SelectionStatus, SignatureStatus,
+  SubmittalStatus, TaskStatus, ThreadType, WarrantyStatus,
   // BB Row types
   Tenant, Account, Customer, Vendor, Job, JobChangeOrder,
   Invoice, InvoiceItem, Payment, Expense, ExpenseItem,
