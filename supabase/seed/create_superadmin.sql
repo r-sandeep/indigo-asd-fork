@@ -81,12 +81,15 @@ BEGIN
   END IF;
 
   -- -------------------------------------------------------------------
-  -- 3. Create user_profile — insert id only (PK guaranteed to exist).
-  --    Profile columns (name, email, avatar) added after schema confirmed.
+  -- 3. Create user_profile
   -- -------------------------------------------------------------------
-  INSERT INTO public.user_profiles (id)
-  VALUES (v_user_id)
-  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.user_profiles (id, first_name, last_name, email, twilio_opt_in)
+  VALUES (v_user_id, 'Santosh', 'Raghunath', v_user_email, true)
+  ON CONFLICT (id) DO UPDATE
+    SET first_name = EXCLUDED.first_name,
+        last_name  = EXCLUDED.last_name,
+        email      = EXCLUDED.email,
+        updated_at = now();
 
   -- -------------------------------------------------------------------
   -- 4. Create tenant_member with owner role

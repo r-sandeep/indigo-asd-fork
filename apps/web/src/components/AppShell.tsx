@@ -72,11 +72,11 @@ export function AppShell() {
         <div className="border-t border-gray-200 p-3">
           <div className="flex items-center gap-2.5 rounded-md px-2 py-2">
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-medium text-brand-700">
-              {profile?.full_name?.[0]?.toUpperCase() ?? '?'}
+              {profile?.first_name?.[0]?.toUpperCase() ?? '?'}
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium text-gray-900">
-                {profile?.full_name ?? 'Loading...'}
+                {profile ? `${profile.first_name} ${profile.last_name}` : 'Loading...'}
               </p>
               <p className="truncate text-xs text-gray-500">{profile?.email ?? ''}</p>
             </div>

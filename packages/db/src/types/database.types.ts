@@ -360,10 +360,13 @@ export interface Setting {
 
 export interface UserProfile {
   id: string
+  first_name: string
+  last_name: string
   email: string
-  full_name: string | null
-  avatar_url: string | null
   phone: string | null
+  avatar_url: string | null
+  title: string | null
+  twilio_opt_in: boolean
   created_at: string
   updated_at: string
 }

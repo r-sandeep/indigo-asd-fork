@@ -27,7 +27,7 @@ export function useAuthListener() {
   async function loadProfile(userId: string) {
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('id, email, full_name, avatar_url, phone, created_at, updated_at')
+      .select('id, first_name, last_name, email, phone, avatar_url, title, twilio_opt_in, created_at, updated_at')
       .eq('id', userId)
       .single()
 

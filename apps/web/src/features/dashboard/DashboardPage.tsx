@@ -16,7 +16,7 @@ export function DashboardPage() {
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">
-          {greeting()}{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
+          {greeting()}{profile?.first_name ? `, ${profile.first_name}` : ''}
         </h1>
         <p className="mt-0.5 text-sm text-gray-500">
           {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
