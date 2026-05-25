@@ -8,6 +8,8 @@ import { ToastProvider } from '@/components/ui/Toast'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
+import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
+import { OverviewTab } from '@/features/projects/tabs/OverviewTab'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
@@ -29,16 +31,27 @@ function AuthRoutes() {
           </RequireAuth>
         }
       >
-        <Route index                element={<DashboardPage />} />
-        <Route path="projects"      element={<ProjectsPage />} />
-        <Route path="projects/:id/*" element={<ComingSoon name="Project Detail" />} />
-        <Route path="schedule"       element={<ComingSoon name="Schedule" />} />
-        <Route path="financials/*"   element={<ComingSoon name="Financials" />} />
-        <Route path="documents"      element={<ComingSoon name="Documents" />} />
-        <Route path="field/*"        element={<ComingSoon name="Field" />} />
-        <Route path="subcontractors" element={<ComingSoon name="Subcontractors" />} />
-        <Route path="ai"             element={<ComingSoon name="AI Assistant" />} />
-        <Route path="*"              element={<Navigate to="/" replace />} />
+        <Route index                  element={<DashboardPage />} />
+        <Route path="projects"        element={<ProjectsPage />} />
+
+        {/* Project detail with nested tab routes */}
+        <Route path="projects/:id"    element={<ProjectDetailPage />}>
+          <Route index                element={<Navigate to="overview" replace />} />
+          <Route path="overview"      element={<OverviewTab />} />
+          <Route path="schedule"      element={<ComingSoon name="Schedule" />} />
+          <Route path="financials"    element={<ComingSoon name="Financials" />} />
+          <Route path="documents"     element={<ComingSoon name="Documents" />} />
+          <Route path="field"         element={<ComingSoon name="Field" />} />
+          <Route path="subs"          element={<ComingSoon name="Subcontractors" />} />
+        </Route>
+
+        <Route path="schedule"        element={<ComingSoon name="Schedule" />} />
+        <Route path="financials/*"    element={<ComingSoon name="Financials" />} />
+        <Route path="documents"       element={<ComingSoon name="Documents" />} />
+        <Route path="field/*"         element={<ComingSoon name="Field" />} />
+        <Route path="subcontractors"  element={<ComingSoon name="Subcontractors" />} />
+        <Route path="ai"              element={<ComingSoon name="AI Assistant" />} />
+        <Route path="*"               element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   )
@@ -46,7 +59,7 @@ function AuthRoutes() {
 
 function ComingSoon({ name }: { name: string }) {
   return (
-    <div className="flex h-full min-h-[60vh] items-center justify-center p-6">
+    <div className="flex h-full min-h-[40vh] items-center justify-center p-6">
       <div className="text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 bg-white">
           <span className="text-2xl">🚧</span>
