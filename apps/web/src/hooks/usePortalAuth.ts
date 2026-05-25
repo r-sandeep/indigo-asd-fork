@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { usePortalAuthStore } from '@/stores/portalAuthStore'
-import { getCustomerByUserId } from '@indigo/shared'
+import { getCustomerByUserId, linkCustomerByEmail } from '@indigo/shared'
 
 export function usePortalAuthListener() {
   const { setAuth, setCustomer, setLoading, clearAuth } = usePortalAuthStore()
@@ -34,7 +34,14 @@ export function usePortalAuthListener() {
   async function loadCustomer(userId: string) {
     setLoading(true)
     try {
-      const customer = await getCustomerByUserId(supabase, userId)
+      let customer = await getCustomerByUserId(supabase, userId)
+
+      // Auto-link on first login: if the user isn't linked yet, try to match
+      // their auth email to a customers row and set portal_user_id via RPC.
+      if (!customer) {
+        customer = await linkCustomerByEmail(supabase, userId)
+      }
+
       setCustomer(customer)
     } catch {
       setCustomer(null)

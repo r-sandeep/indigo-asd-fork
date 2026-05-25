@@ -16,15 +16,13 @@ export function PortalLoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        shouldCreateUser: false,
+        shouldCreateUser: true,
         emailRedirectTo: `${window.location.origin}/portal`,
       },
     })
 
     if (error) {
-      setError(error.message === 'Signups not allowed for otp'
-        ? 'No portal account found for this email. Please contact your builder.'
-        : error.message)
+      setError(error.message)
     } else {
       setSent(true)
     }

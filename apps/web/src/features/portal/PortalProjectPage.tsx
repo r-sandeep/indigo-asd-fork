@@ -1,6 +1,6 @@
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { getPortalProjectData } from '@indigo/shared'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getPortalProjectData, approvePortalMilestone } from '@indigo/shared'
 import { formatMoney } from '@indigo/shared'
 import type { PortalMilestone, PortalInvoice, PortalDocument } from '@indigo/shared'
 import { supabase } from '@/lib/supabase'
@@ -121,7 +121,15 @@ function ProgressCard({
 
 // ── Timeline ───────────────────────────────────────────────────────────────
 
-function TimelineSection({ milestones }: { milestones: PortalMilestone[] }) {
+function TimelineSection({
+  milestones,
+  onApprove,
+  approvingId,
+}: {
+  milestones: PortalMilestone[]
+  onApprove: (milestoneId: string) => void
+  approvingId: string | null
+}) {
   if (milestones.length === 0) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -140,6 +148,7 @@ function TimelineSection({ milestones }: { milestones: PortalMilestone[] }) {
           const done     = m.status === 'complete' || m.status === 'approved'
           const needsApproval = m.requires_client_approval && !m.client_approved_at && !done
           const isLast   = i === milestones.length - 1
+          const isApproving = approvingId === m.id
 
           return (
             <div key={m.id} className="flex gap-3">
@@ -157,7 +166,7 @@ function TimelineSection({ milestones }: { milestones: PortalMilestone[] }) {
               </div>
 
               {/* Content */}
-              <div className={`min-w-0 flex-1 pb-4 ${isLast ? '' : ''}`}>
+              <div className="min-w-0 flex-1 pb-4">
                 <div className="flex items-start justify-between gap-2">
                   <p className={`text-sm font-medium leading-snug ${done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
                     {m.name}
@@ -169,7 +178,19 @@ function TimelineSection({ milestones }: { milestones: PortalMilestone[] }) {
                   ) : null}
                 </div>
                 {needsApproval && (
-                  <p className="mt-0.5 text-xs font-medium text-amber-600">Your approval needed</p>
+                  <div className="mt-1.5 flex items-center gap-3">
+                    <p className="text-xs font-medium text-amber-600">Your approval is required</p>
+                    <button
+                      onClick={() => onApprove(m.id)}
+                      disabled={isApproving}
+                      className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+                    >
+                      {isApproving ? 'Approving…' : 'Approve'}
+                    </button>
+                  </div>
+                )}
+                {m.requires_client_approval && m.client_approved_at && !done && (
+                  <p className="mt-0.5 text-xs text-green-600">✓ Approved by you {fmtDateShort(m.client_approved_at)}</p>
                 )}
               </div>
             </div>
@@ -303,12 +324,18 @@ function PortalSkeleton() {
 
 export function PortalProjectPage() {
   const { id: projectId } = useParams<{ id: string }>()
+  const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
     queryKey:  ['portal-project', projectId],
     queryFn:   () => getPortalProjectData(supabase, projectId!),
     enabled:   !!projectId,
     staleTime: 60_000,
+  })
+
+  const approveMut = useMutation({
+    mutationFn: (milestoneId: string) => approvePortalMilestone(supabase, milestoneId),
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['portal-project', projectId] }),
   })
 
   if (isLoading) return <PortalSkeleton />
@@ -340,7 +367,11 @@ export function PortalProjectPage() {
         contractCents={job?.current_contract_cents ?? job?.contract_value_cents ?? null}
       />
 
-      <TimelineSection milestones={milestones} />
+      <TimelineSection
+        milestones={milestones}
+        onApprove={(id) => approveMut.mutate(id)}
+        approvingId={approveMut.isPending ? (approveMut.variables ?? null) : null}
+      />
 
       <InvoicesSection invoices={invoices} />
 

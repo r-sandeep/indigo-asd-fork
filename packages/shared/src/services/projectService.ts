@@ -621,6 +621,61 @@ export interface CustomerListItem {
   email: string
 }
 
+/** Full customer record including portal linkage status */
+export interface JobCustomer {
+  id: string
+  customer_name: string
+  email: string
+  phone: string | null
+  portal_user_id: string | null
+}
+
+/**
+ * Fetches the customer linked to a job.
+ * Used by the staff ClientTab to show portal status + send invites.
+ */
+export async function getJobCustomer(
+  client: SupabaseClient,
+  jobId: string,
+): Promise<JobCustomer | null> {
+  // First resolve customer_id from the job
+  const { data: job, error: jobError } = await client
+    .from('jobs')
+    .select('customer_id')
+    .eq('id', jobId)
+    .single()
+
+  if (jobError) throw jobError
+  const customerId = (job as { customer_id: string | null })?.customer_id
+  if (!customerId) return null
+
+  const { data, error } = await client
+    .from('customers')
+    .select('id, customer_name, email, phone, portal_user_id')
+    .eq('id', customerId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data as JobCustomer | null
+}
+
+/**
+ * Toggles the is_client_visible flag on a single milestone.
+ * Used by the staff ClientTab to control portal visibility per milestone.
+ */
+export async function setMilestoneClientVisible(
+  client: SupabaseClient,
+  milestoneId: string,
+  isVisible: boolean,
+): Promise<void> {
+  const { error } = await client
+    .from('milestones')
+    .update({ is_client_visible: isVisible } as unknown as never)
+    .eq('id', milestoneId)
+
+  if (error) throw error
+}
+
 export async function getCustomers(
   client: SupabaseClient,
   tenantId: string,

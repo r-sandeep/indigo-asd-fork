@@ -16,6 +16,7 @@ import { FinancialsTab } from '@/features/projects/tabs/FinancialsTab'
 import { DocumentsTab } from '@/features/projects/tabs/DocumentsTab'
 import { FieldTab } from '@/features/projects/tabs/FieldTab'
 import { SubsTab } from '@/features/projects/tabs/SubsTab'
+import { ClientTab } from '@/features/projects/tabs/ClientTab'
 import { PortalLoginPage } from '@/features/portal/PortalLoginPage'
 import { PortalShell } from '@/features/portal/PortalShell'
 import { PortalProjectsPage } from '@/features/portal/PortalProjectsPage'
@@ -55,6 +56,7 @@ function AuthRoutes() {
           <Route path="documents"     element={<DocumentsTab />} />
           <Route path="field"         element={<FieldTab />} />
           <Route path="subs"          element={<SubsTab />} />
+          <Route path="client"        element={<ClientTab />} />
         </Route>
 
         <Route path="schedule"        element={<ComingSoon name="Schedule" />} />

@@ -75,6 +75,41 @@ export interface PortalProjectData {
   documents: PortalDocument[]
 }
 
+// ── Mutations ─────────────────────────────────────────────────────────────
+
+/**
+ * Called on first portal login when getCustomerByUserId returns null.
+ * Calls the portal_link_self() security-definer RPC which matches
+ * auth.email() → customers.email (case-insensitive) and sets portal_user_id.
+ * Returns the now-linked customer, or null if no match was found.
+ */
+export async function linkCustomerByEmail(
+  client: SupabaseClient,
+  userId: string,
+): Promise<PortalCustomer | null> {
+  const { error } = await client.rpc('portal_link_self')
+  if (error) throw error
+
+  // Re-fetch the (now linked) customer
+  return getCustomerByUserId(client, userId)
+}
+
+/**
+ * Portal client approves a milestone via the portal_approve_milestone()
+ * security-definer RPC. The function validates the caller is the job's
+ * client and that the milestone actually requires approval.
+ */
+export async function approvePortalMilestone(
+  client: SupabaseClient,
+  milestoneId: string,
+): Promise<void> {
+  const { error } = await client.rpc(
+    'portal_approve_milestone',
+    { p_milestone_id: milestoneId } as unknown as never,
+  )
+  if (error) throw error
+}
+
 // ── Queries ────────────────────────────────────────────────────────────────
 
 export async function getCustomerByUserId(
