@@ -866,3 +866,120 @@ export async function deleteMilestone(
     .eq('tenant_id', tenantId)
   if (error) throw error
 }
+
+// ── Change order mutations ─────────────────────────────────────────────────
+
+export interface CreateChangeOrderInput {
+  co_number: string
+  title?: string | null
+  description?: string | null
+  amount_cents: number
+  co_status: string
+  date_submitted?: string | null
+  schedule_impact_days?: number | null
+  reason?: string | null
+  notes?: string | null
+}
+
+export async function createChangeOrder(
+  client: SupabaseClient,
+  tenantId: string,
+  jobId: string,
+  userId: string,
+  input: CreateChangeOrderInput,
+): Promise<{ id: string }> {
+  // CRITICAL: Never set job_change_orders.status — BB-owned with check constraint
+  // (default 'Pending'). Track Indigo state in co_status instead.
+  const { data, error } = await client
+    .from('job_change_orders')
+    .insert({
+      tenant_id:             tenantId,
+      job_id:                jobId,
+      co_number:             input.co_number,
+      title:                 input.title               ?? null,
+      description:           input.description         ?? '',
+      amount_cents:          input.amount_cents,
+      co_status:             input.co_status,
+      date_submitted:        input.date_submitted      ?? null,
+      schedule_impact_days:  input.schedule_impact_days ?? null,
+      reason:                input.reason              ?? null,
+      notes:                 input.notes               ?? '',
+      requested_by_user_id:  userId,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
+
+// ── Draw schedule mutations ────────────────────────────────────────────────
+
+export interface CreateDrawScheduleInput {
+  lender_name?: string | null
+  lender_contact?: string | null
+  lender_email?: string | null
+  loan_amount_cents?: number | null
+  holdback_pct?: number
+}
+
+export async function createDrawSchedule(
+  client: SupabaseClient,
+  tenantId: string,
+  jobId: string,
+  input: CreateDrawScheduleInput,
+): Promise<{ id: string }> {
+  const { data, error } = await client
+    .from('draw_schedules')
+    .insert({
+      tenant_id:         tenantId,
+      job_id:            jobId,
+      lender_name:       input.lender_name       ?? null,
+      lender_contact:    input.lender_contact     ?? null,
+      lender_email:      input.lender_email       ?? null,
+      loan_amount_cents: input.loan_amount_cents  ?? null,
+      holdback_pct:      input.holdback_pct       ?? 10,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
+
+export interface CreateDrawRequestInput {
+  number: number
+  amount_requested_cents: number
+  percent_complete_at_draw?: number | null
+  notes?: string | null
+  submit_now: boolean
+}
+
+export async function createDrawRequest(
+  client: SupabaseClient,
+  tenantId: string,
+  jobId: string,
+  drawScheduleId: string,
+  userId: string,
+  input: CreateDrawRequestInput,
+): Promise<{ id: string }> {
+  const status = input.submit_now ? 'submitted' : 'draft'
+  const { data, error } = await client
+    .from('draw_requests')
+    .insert({
+      draw_schedule_id:         drawScheduleId,
+      tenant_id:                tenantId,
+      job_id:                   jobId,
+      number:                   input.number,
+      status,
+      amount_requested_cents:   input.amount_requested_cents,
+      amount_approved_cents:    0,
+      amount_funded_cents:      0,
+      percent_complete_at_draw: input.percent_complete_at_draw ?? null,
+      notes:                    input.notes                    ?? null,
+      submitted_at:             input.submit_now ? new Date().toISOString() : null,
+      created_by:               userId,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
