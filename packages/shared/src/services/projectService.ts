@@ -1008,6 +1008,218 @@ export async function withdrawChangeOrder(
   if (error) throw error
 }
 
+// ── Daily log photos ──────────────────────────────────────────────────────
+// daily_log_photos (from migration 008) is a join table between daily_logs
+// and documents. Each photo is a documents row (type='photo',
+// storage_bucket='project-photos') plus a daily_log_photos linking row.
+//
+// Storage path: {tenantId}/daily-logs/{logId}/{uuid}.{ext}
+
+export const PHOTO_BUCKET = 'project-photos'
+const SIGNED_URL_EXPIRY = 3_600 // seconds (1 hour)
+
+export interface DailyLogPhoto {
+  /** daily_log_photos.id */
+  id: string
+  daily_log_id: string
+  document_id: string
+  caption: string | null
+  sequence: number
+  is_client_visible: boolean
+  created_at: string
+  // Flattened from joined documents row:
+  storage_path: string
+  storage_bucket: string
+  mime_type: string | null
+  file_size_bytes: number | null
+  /** Batch-signed URL — valid for 1 hour */
+  signedUrl: string
+}
+
+/**
+ * Uploads a photo to project-photos, creates a documents row (type='photo'),
+ * then links it via daily_log_photos. Returns the new record with signed URL.
+ */
+export async function uploadDailyLogPhoto(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  logId: string,
+  userId: string,
+  file: File,
+  caption?: string | null,
+): Promise<DailyLogPhoto> {
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+  const uuid = crypto.randomUUID()
+  const storagePath = `${tenantId}/daily-logs/${logId}/${uuid}.${ext}`
+
+  // 1. Upload to storage
+  const { error: uploadError } = await client.storage
+    .from(PHOTO_BUCKET)
+    .upload(storagePath, file, { upsert: false })
+  if (uploadError) throw uploadError
+
+  // 2. Insert documents row
+  const { data: doc, error: docError } = await client
+    .from('documents')
+    .insert({
+      tenant_id:       tenantId,
+      project_id:      projectId,
+      type:            'photo',
+      name:            file.name,
+      storage_bucket:  PHOTO_BUCKET,
+      storage_path:    storagePath,
+      mime_type:       file.type || null,
+      file_size_bytes: file.size,
+      uploaded_by:     userId,
+      is_client_visible: false,
+    } as unknown as never)
+    .select('id')
+    .single()
+
+  if (docError) {
+    await client.storage.from(PHOTO_BUCKET).remove([storagePath]).catch(() => null)
+    throw docError
+  }
+
+  const documentId = (doc as { id: string }).id
+
+  // 3. Insert daily_log_photos linking row
+  const { data: photo, error: photoError } = await client
+    .from('daily_log_photos')
+    .insert({
+      daily_log_id:      logId,
+      document_id:       documentId,
+      caption:           caption ?? null,
+      sequence:          0,
+      is_client_visible: true,
+    } as unknown as never)
+    .select('id, daily_log_id, document_id, caption, sequence, is_client_visible, created_at')
+    .single()
+
+  if (photoError) {
+    // Best-effort rollback
+    await Promise.resolve(client.from('documents').delete().eq('id', documentId)).catch(() => null)
+    await client.storage.from(PHOTO_BUCKET).remove([storagePath]).catch(() => null)
+    throw photoError
+  }
+
+  // 4. Sign URL for immediate display
+  const { data: signed, error: signError } = await client.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(storagePath, SIGNED_URL_EXPIRY)
+  if (signError) throw signError
+
+  return {
+    ...(photo as Omit<DailyLogPhoto, 'storage_path' | 'storage_bucket' | 'mime_type' | 'file_size_bytes' | 'signedUrl'>),
+    storage_path:    storagePath,
+    storage_bucket:  PHOTO_BUCKET,
+    mime_type:       file.type || null,
+    file_size_bytes: file.size,
+    signedUrl:       signed.signedUrl,
+  }
+}
+
+/**
+ * Fetches all photos for a daily log, joining through documents for the
+ * storage path, then batch-signs all URLs in one round-trip (Option B).
+ */
+export async function getDailyLogPhotos(
+  client: SupabaseClient,
+  logId: string,
+): Promise<DailyLogPhoto[]> {
+  const { data, error } = await client
+    .from('daily_log_photos')
+    .select(`
+      id, daily_log_id, document_id, caption, sequence, is_client_visible, created_at,
+      document:documents ( storage_path, storage_bucket, mime_type, file_size_bytes )
+    `)
+    .eq('daily_log_id', logId)
+    .order('sequence', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  type RawRow = {
+    id: string; daily_log_id: string; document_id: string
+    caption: string | null; sequence: number; is_client_visible: boolean; created_at: string
+    document: { storage_path: string; storage_bucket: string; mime_type: string | null; file_size_bytes: number | null } | null
+  }
+  const rows = (data ?? []) as RawRow[]
+  const valid = rows.filter((r) => r.document !== null)
+  if (valid.length === 0) return []
+
+  // Batch-sign all URLs — one storage API call regardless of photo count
+  const { data: signed, error: signError } = await client.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(
+      valid.map((r) => r.document!.storage_path),
+      SIGNED_URL_EXPIRY,
+    )
+  if (signError) throw signError
+
+  const urlMap = new Map((signed ?? []).map((s) => [s.path, s.signedUrl ?? '']))
+
+  return valid.map((r) => ({
+    id:               r.id,
+    daily_log_id:     r.daily_log_id,
+    document_id:      r.document_id,
+    caption:          r.caption,
+    sequence:         r.sequence,
+    is_client_visible: r.is_client_visible,
+    created_at:       r.created_at,
+    storage_path:     r.document!.storage_path,
+    storage_bucket:   r.document!.storage_bucket,
+    mime_type:        r.document!.mime_type,
+    file_size_bytes:  r.document!.file_size_bytes,
+    signedUrl:        urlMap.get(r.document!.storage_path) ?? '',
+  }))
+}
+
+/**
+ * Deletes in safe order: storage object → daily_log_photos row → documents row.
+ * documents has no CASCADE from daily_log_photos, so the junction row must
+ * be removed before the document can be deleted.
+ */
+export async function deleteDailyLogPhoto(
+  client: SupabaseClient,
+  photoId: string,
+  documentId: string,
+  storagePath: string,
+): Promise<void> {
+  // 1. Remove storage object (tolerate 404 — already cleaned up)
+  const { error: storageError } = await client.storage
+    .from(PHOTO_BUCKET)
+    .remove([storagePath])
+  if (storageError && !storageError.message.includes('Not Found')) throw storageError
+
+  // 2. Remove linking row
+  const { error: photoError } = await client
+    .from('daily_log_photos')
+    .delete()
+    .eq('id', photoId)
+  if (photoError) throw photoError
+
+  // 3. Remove documents row (no longer referenced)
+  const { error: docError } = await client
+    .from('documents')
+    .delete()
+    .eq('id', documentId)
+  if (docError) throw docError
+}
+
+/** Updates the caption on a single photo. Pass null to clear it. */
+export async function updateDailyLogPhotoCaption(
+  client: SupabaseClient,
+  photoId: string,
+  caption: string | null,
+): Promise<void> {
+  const { error } = await client
+    .from('daily_log_photos')
+    .update({ caption } as unknown as never)
+    .eq('id', photoId)
+  if (error) throw error
+}
+
 // ── Daily log mutations ────────────────────────────────────────────────────
 
 export interface CreateDailyLogInput {

@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useOutletContext, useParams } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   ProjectRow,
   ProjectRfi,
   ProjectPunchItem,
   ProjectSubmittal,
   ProjectDailyLog,
+  DailyLogPhoto,
   CreateDailyLogInput,
   UpdateDailyLogInput,
 } from '@indigo/shared'
@@ -15,6 +16,10 @@ import {
   updateDailyLog,
   publishDailyLog,
   setDailyLogClientVisible,
+  getDailyLogPhotos,
+  uploadDailyLogPhoto,
+  deleteDailyLogPhoto,
+  updateDailyLogPhotoCaption,
 } from '@indigo/shared'
 import { useProjectFieldData } from '../useProject'
 import { useAuth } from '@/hooks/useAuth'
@@ -406,6 +411,278 @@ function DailyLogModal({ mode, log, onSubmit, onClose, isLoading }: DailyLogModa
   )
 }
 
+// ── Photo lightbox ─────────────────────────────────────────────────────────
+
+function PhotoLightbox({
+  photos,
+  initialIndex,
+  onClose,
+}: {
+  photos: DailyLogPhoto[]
+  initialIndex: number
+  onClose: () => void
+}) {
+  const [current, setCurrent] = useState(initialIndex)
+  const photo = photos[current]
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft')  setCurrent((i) => Math.max(0, i - 1))
+      if (e.key === 'ArrowRight') setCurrent((i) => Math.min(photos.length - 1, i + 1))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [photos.length, onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90"
+      onClick={onClose}
+    >
+      {/* Close */}
+      <button
+        onClick={onClose}
+        className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+      >
+        ✕
+      </button>
+
+      {/* Counter */}
+      {photos.length > 1 && (
+        <p className="absolute top-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
+          {current + 1} / {photos.length}
+        </p>
+      )}
+
+      {/* Image */}
+      <img
+        src={photo.signedUrl}
+        alt={photo.caption ?? `Photo ${current + 1}`}
+        className="max-h-[82vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      {/* Caption */}
+      {photo.caption && (
+        <p className="mt-3 max-w-lg text-center text-sm text-white/80">{photo.caption}</p>
+      )}
+
+      {/* Prev / Next */}
+      {photos.length > 1 && (
+        <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-3 pointer-events-none">
+          <button
+            onClick={(e) => { e.stopPropagation(); setCurrent((i) => Math.max(0, i - 1)) }}
+            disabled={current === 0}
+            className="pointer-events-auto rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:opacity-20"
+          >
+            ◀
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setCurrent((i) => Math.min(photos.length - 1, i + 1)) }}
+            disabled={current === photos.length - 1}
+            className="pointer-events-auto rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:opacity-20"
+          >
+            ▶
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Log photo gallery (lazy-mounts when log row is expanded) ───────────────
+
+const MAX_FILE_SIZE_MB = 20
+
+function LogPhotoGallery({
+  logId,
+  projectId,
+  tenantId,
+  userId,
+}: {
+  logId: string
+  projectId: string
+  tenantId: string
+  userId: string
+}) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [editingCaption, setEditingCaption] = useState<{ id: string; draft: string } | null>(null)
+
+  const { data: photos = [], isLoading } = useQuery({
+    queryKey:  ['log-photos', logId],
+    queryFn:   () => getDailyLogPhotos(supabase, logId),
+    staleTime: 60_000,
+  })
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['log-photos', logId] })
+
+  const deleteMut = useMutation({
+    mutationFn: ({ id, documentId, path }: { id: string; documentId: string; path: string }) =>
+      deleteDailyLogPhoto(supabase, id, documentId, path),
+    onSuccess: () => { invalidate(); toast.success('Photo removed') },
+    onError:   (e: Error) => toast.error(e.message),
+  })
+
+  const captionMut = useMutation({
+    mutationFn: ({ id, caption }: { id: string; caption: string | null }) =>
+      updateDailyLogPhotoCaption(supabase, id, caption),
+    onSuccess: () => { invalidate(); setEditingCaption(null) },
+    onError:   (e: Error) => toast.error(e.message),
+  })
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+
+    const valid = Array.from(files).filter((f) => {
+      if (!f.type.startsWith('image/')) {
+        toast.error(`${f.name} is not an image`)
+        return false
+      }
+      if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        toast.error(`${f.name} exceeds ${MAX_FILE_SIZE_MB} MB`)
+        return false
+      }
+      return true
+    })
+    if (valid.length === 0) return
+
+    setUploading(true)
+    try {
+      await Promise.all(valid.map((f) => uploadDailyLogPhoto(supabase, tenantId, projectId, logId, userId, f)))
+      invalidate()
+      toast.success(`${valid.length} photo${valid.length > 1 ? 's' : ''} added`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-gray-200 pt-3">
+      {/* Section header */}
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+          Photos{photos.length > 0 ? ` (${photos.length})` : ''}
+        </p>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+        >
+          {uploading ? (
+            <span className="animate-pulse">Uploading…</span>
+          ) : (
+            <>
+              <PlusIcon className="h-3 w-3" />
+              Add Photos
+            </>
+          )}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+      </div>
+
+      {/* Grid */}
+      {isLoading ? (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="aspect-square animate-pulse rounded-lg bg-gray-200" />
+          ))}
+        </div>
+      ) : photos.length === 0 ? (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-200 py-6 text-xs text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors"
+        >
+          <PlusIcon className="h-4 w-4" />
+          Add photos to this log
+        </button>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {photos.map((photo, idx) => (
+            <div key={photo.id} className="group relative">
+              {/* Thumbnail */}
+              <button
+                onClick={() => setLightboxIndex(idx)}
+                className="block aspect-square w-full overflow-hidden rounded-lg bg-gray-100"
+              >
+                <img
+                  src={photo.signedUrl}
+                  alt={photo.caption ?? `Photo ${idx + 1}`}
+                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                  loading="lazy"
+                />
+              </button>
+
+              {/* Delete button (hover) */}
+              <button
+                onClick={() => deleteMut.mutate({ id: photo.id, documentId: photo.document_id, path: photo.storage_path })}
+                disabled={deleteMut.isPending}
+                className="absolute right-1 top-1 hidden rounded-full bg-black/60 p-0.5 text-[10px] text-white hover:bg-red-600 group-hover:flex"
+                title="Remove photo"
+              >
+                ✕
+              </button>
+
+              {/* Caption */}
+              {editingCaption?.id === photo.id ? (
+                <div className="mt-1">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={editingCaption.draft}
+                    onChange={(e) => setEditingCaption({ id: photo.id, draft: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter')
+                        captionMut.mutate({ id: photo.id, caption: editingCaption.draft.trim() || null })
+                      if (e.key === 'Escape') setEditingCaption(null)
+                    }}
+                    onBlur={() =>
+                      captionMut.mutate({ id: photo.id, caption: editingCaption.draft.trim() || null })
+                    }
+                    placeholder="Add caption…"
+                    className="w-full rounded border border-brand-400 px-1.5 py-0.5 text-[11px] focus:outline-none"
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => setEditingCaption({ id: photo.id, draft: photo.caption ?? '' })}
+                  className="mt-0.5 block w-full truncate text-left text-[11px] text-gray-400 hover:text-gray-600"
+                  title={photo.caption ?? 'Add caption'}
+                >
+                  {photo.caption ?? <span className="italic">Add caption</span>}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Lightbox */}
+      {lightboxIndex !== null && photos.length > 0 && (
+        <PhotoLightbox
+          photos={photos}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Daily Logs section ─────────────────────────────────────────────────────
 
 interface DailyLogsSectionProps {
@@ -588,6 +865,14 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
                           <p className="mt-0.5 text-xs text-gray-700 whitespace-pre-line">{item.value}</p>
                         </div>
                       ))}
+
+                      {/* Photos — lazy-fetched once the row is expanded */}
+                      <LogPhotoGallery
+                        logId={log.id}
+                        projectId={projectId}
+                        tenantId={tenantId}
+                        userId={userId}
+                      />
                     </div>
                   )}
                 </div>

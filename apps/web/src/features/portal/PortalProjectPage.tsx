@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -6,6 +6,7 @@ import {
   getPortalSelections,
   approvePortalMilestone,
   upsertPortalSelection,
+  getDailyLogPhotos,
   formatMoney,
 } from '@indigo/shared'
 import type {
@@ -15,6 +16,7 @@ import type {
   PortalDailyLog,
   PortalChangeOrder,
   PortalSelectionCategory,
+  DailyLogPhoto,
 } from '@indigo/shared'
 import { supabase } from '@/lib/supabase'
 import { usePortalAuth } from '@/hooks/usePortalAuth'
@@ -579,6 +581,134 @@ function ChangeOrdersSection({ changeOrders }: { changeOrders: PortalChangeOrder
   )
 }
 
+// ── Portal photo lightbox ──────────────────────────────────────────────────
+
+function PortalPhotoLightbox({
+  photos,
+  initialIndex,
+  onClose,
+}: {
+  photos: DailyLogPhoto[]
+  initialIndex: number
+  onClose: () => void
+}) {
+  const [current, setCurrent] = useState(initialIndex)
+  const photo = photos[current]
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape')      onClose()
+      if (e.key === 'ArrowLeft')   setCurrent((i) => Math.max(0, i - 1))
+      if (e.key === 'ArrowRight')  setCurrent((i) => Math.min(photos.length - 1, i + 1))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [photos.length, onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90"
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+      >
+        ✕
+      </button>
+
+      {photos.length > 1 && (
+        <p className="absolute top-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
+          {current + 1} / {photos.length}
+        </p>
+      )}
+
+      <img
+        src={photo.signedUrl}
+        alt={photo.caption ?? `Photo ${current + 1}`}
+        className="max-h-[82vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      {photo.caption && (
+        <p className="mt-3 max-w-lg text-center text-sm text-white/80">{photo.caption}</p>
+      )}
+
+      {photos.length > 1 && (
+        <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-3 pointer-events-none">
+          <button
+            onClick={(e) => { e.stopPropagation(); setCurrent((i) => Math.max(0, i - 1)) }}
+            disabled={current === 0}
+            className="pointer-events-auto rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:opacity-20"
+          >
+            ◀
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setCurrent((i) => Math.min(photos.length - 1, i + 1)) }}
+            disabled={current === photos.length - 1}
+            className="pointer-events-auto rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:opacity-20"
+          >
+            ▶
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Portal log photos (lazy-fetched on expand) ─────────────────────────────
+
+function PortalLogPhotos({ logId }: { logId: string }) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+
+  const { data: photos = [], isLoading } = useQuery({
+    queryKey:  ['portal-log-photos', logId],
+    queryFn:   () => getDailyLogPhotos(supabase, logId),
+    staleTime: 300_000, // 5 min — portal is read-only, no need to refresh often
+  })
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="aspect-square animate-pulse rounded-xl bg-gray-200" />
+        ))}
+      </div>
+    )
+  }
+
+  if (photos.length === 0) return null
+
+  return (
+    <>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {photos.map((photo, idx) => (
+          <button
+            key={photo.id}
+            onClick={() => setLightboxIndex(idx)}
+            className="group aspect-square overflow-hidden rounded-xl bg-gray-100"
+          >
+            <img
+              src={photo.signedUrl}
+              alt={photo.caption ?? `Photo ${idx + 1}`}
+              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+              loading="lazy"
+            />
+          </button>
+        ))}
+      </div>
+
+      {lightboxIndex !== null && (
+        <PortalPhotoLightbox
+          photos={photos}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+    </>
+  )
+}
+
 // ── Daily logs (Field Updates) ─────────────────────────────────────────────
 
 function DailyLogsSection({ logs }: { logs: PortalDailyLog[] }) {
@@ -610,6 +740,7 @@ function DailyLogsSection({ logs }: { logs: PortalDailyLog[] }) {
           const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
           const dateStr = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
           const hasDetails = !!(log.materials_delivered || log.equipment_used || log.issues_or_delays)
+          // Always expandable: photos are lazy-loaded and we don't know until fetch
 
           return (
             <div key={log.id} className="px-5 py-4">
@@ -632,39 +763,39 @@ function DailyLogsSection({ logs }: { logs: PortalDailyLog[] }) {
               {/* Summary text */}
               <p className="text-sm text-gray-700 leading-relaxed">{summary}</p>
 
-              {/* Expandable details */}
-              {hasDetails && (
-                <>
-                  {isExpanded && (
-                    <div className="mt-3 space-y-2 rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-600">
-                      {log.materials_delivered && (
-                        <div>
-                          <p className="font-semibold text-gray-700 mb-0.5">Materials delivered</p>
-                          <p>{log.materials_delivered}</p>
-                        </div>
-                      )}
-                      {log.equipment_used && (
-                        <div>
-                          <p className="font-semibold text-gray-700 mb-0.5">Equipment used</p>
-                          <p>{log.equipment_used}</p>
-                        </div>
-                      )}
-                      {log.issues_or_delays && (
-                        <div>
-                          <p className="font-semibold text-amber-700 mb-0.5">Issues / delays</p>
-                          <p className="text-amber-700">{log.issues_or_delays}</p>
-                        </div>
-                      )}
+              {/* Photos — lazy-fetched when row is expanded */}
+              {isExpanded && <PortalLogPhotos logId={log.id} />}
+
+              {/* Expandable details (always expandable — photos also live here) */}
+              {isExpanded && hasDetails && (
+                <div className="mt-3 space-y-2 rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-600">
+                  {log.materials_delivered && (
+                    <div>
+                      <p className="font-semibold text-gray-700 mb-0.5">Materials delivered</p>
+                      <p>{log.materials_delivered}</p>
                     </div>
                   )}
-                  <button
-                    onClick={() => toggle(log.id)}
-                    className="mt-2 text-xs text-brand-600 hover:text-brand-700 transition-colors"
-                  >
-                    {isExpanded ? 'Show less ▲' : 'More details ▼'}
-                  </button>
-                </>
+                  {log.equipment_used && (
+                    <div>
+                      <p className="font-semibold text-gray-700 mb-0.5">Equipment used</p>
+                      <p>{log.equipment_used}</p>
+                    </div>
+                  )}
+                  {log.issues_or_delays && (
+                    <div>
+                      <p className="font-semibold text-amber-700 mb-0.5">Issues / delays</p>
+                      <p className="text-amber-700">{log.issues_or_delays}</p>
+                    </div>
+                  )}
+                </div>
               )}
+
+              <button
+                onClick={() => toggle(log.id)}
+                className="mt-2 text-xs text-brand-600 hover:text-brand-700 transition-colors"
+              >
+                {isExpanded ? 'Show less ▲' : (hasDetails ? 'More details ▼' : 'Photos ▼')}
+              </button>
             </div>
           )
         })}
