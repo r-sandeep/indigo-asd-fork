@@ -19,6 +19,7 @@ function tabs(id: string): Tab[] {
     { to: `/projects/${id}/field`,       label: 'Field',  live: true },
     { to: `/projects/${id}/subs`,        label: 'Subs',   live: true },
     { to: `/projects/${id}/client`,      label: 'Client', live: true },
+    { to: `/projects/${id}/clock`,       label: 'Clock',  live: true },
   ]
 }
 

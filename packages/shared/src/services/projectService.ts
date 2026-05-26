@@ -1388,3 +1388,412 @@ export async function createDrawRequest(
   if (error) throw error
   return data as { id: string }
 }
+
+// ── Time tracking types (migration 017) ───────────────────────────────────
+
+export type SessionStatus = 'active' | 'on_break' | 'completed' | 'auto_closed'
+
+export interface WorkSession {
+  id: string
+  tenant_id: string
+  project_id: string
+  job_id: string
+  user_id: string
+  // Clock-in
+  clocked_in_at: string
+  clock_in_lat: number | null
+  clock_in_lng: number | null
+  clock_in_accuracy_m: number | null
+  clock_in_geofence_ok: boolean
+  // Clock-out
+  clocked_out_at: string | null
+  clock_out_lat: number | null
+  clock_out_lng: number | null
+  clock_out_accuracy_m: number | null
+  clock_out_geofence_ok: boolean | null
+  // Breaks
+  total_break_minutes: number
+  auto_break_deducted: boolean
+  // Computed hours
+  gross_hours: number | null
+  net_hours: number | null
+  regular_hours: number | null
+  ot_1_5_hours: number | null
+  ot_2_0_hours: number | null
+  is_seventh_day: boolean
+  // Labor cost
+  wage_snapshot_cents: number | null
+  labor_cost_cents: number | null
+  // Status
+  status: SessionStatus
+  time_entry_id: string | null
+  notes: string | null
+  created_at: string
+  // Optional joined user data (when fetching "who's on site")
+  user?: { first_name: string; last_name: string; avatar_url: string | null }
+}
+
+export interface WorkSessionBreak {
+  id: string
+  session_id: string
+  started_at: string
+  ended_at: string | null
+  duration_minutes: number | null
+  break_type: string
+  created_at: string
+}
+
+export interface GeofenceViolation {
+  id: string
+  tenant_id: string
+  user_id: string
+  project_id: string
+  attempt_type: string
+  latitude: number
+  longitude: number
+  accuracy_m: number | null
+  distance_from_site_m: number
+  geofence_radius_m: number
+  was_rejected: boolean
+  attempted_at: string
+}
+
+export interface EmployeeWage {
+  id: string
+  tenant_id: string
+  user_id: string
+  effective_date: string
+  hourly_rate_cents: number
+  created_at: string
+}
+
+export interface ClockInResult {
+  session_id: string
+  geofence_ok: boolean
+  warning: string | null
+}
+
+export interface ClockOutResult {
+  session_id: string
+  net_hours: number
+  regular_hours: number
+  ot_1_5_hours: number
+  ot_2_0_hours: number
+  labor_cost_cents: number | null
+  auto_break_deducted: boolean
+  is_seventh_day: boolean
+  geofence_ok: boolean
+}
+
+export interface ProjectLaborSummary {
+  total_net_hours: number
+  total_regular_hours: number
+  total_ot_1_5_hours: number
+  total_ot_2_0_hours: number
+  total_labor_cost_cents: number
+  active_session_count: number
+}
+
+// ── Time tracking RPCs ────────────────────────────────────────────────────
+
+/**
+ * Clocks an employee in to a project. Validates geofence if site coordinates
+ * are set. Returns session_id + geofence status.
+ * Throws 'outside_geofence' if GPS is precise and user is outside the fence.
+ */
+export async function clockIn(
+  client: SupabaseClient,
+  projectId: string,
+  lat: number,
+  lng: number,
+  accuracyM: number,
+): Promise<ClockInResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any).rpc('clock_in', {
+    p_project_id: projectId,
+    p_lat:        lat,
+    p_lng:        lng,
+    p_accuracy_m: accuracyM,
+  })
+  if (error) throw error
+  return data as ClockInResult
+}
+
+/**
+ * Clocks out of the active session. Auto-closes any open break. Computes
+ * California OT, deducts lunch if needed, writes time_entries row.
+ * Geofence at clock-out is logged but NEVER blocks the operation.
+ */
+export async function clockOut(
+  client: SupabaseClient,
+  sessionId: string,
+  lat: number,
+  lng: number,
+  accuracyM: number,
+): Promise<ClockOutResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any).rpc('clock_out', {
+    p_session_id: sessionId,
+    p_lat:        lat,
+    p_lng:        lng,
+    p_accuracy_m: accuracyM,
+  })
+  if (error) throw error
+  return data as ClockOutResult
+}
+
+/** Starts a break on the active session (sets status → 'on_break'). */
+export async function startBreak(
+  client: SupabaseClient,
+  sessionId: string,
+  breakType: 'meal' | 'rest' | 'other' = 'meal',
+): Promise<{ break_id: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any).rpc('start_break', {
+    p_session_id: sessionId,
+    p_break_type: breakType,
+  })
+  if (error) throw error
+  return data as { break_id: string }
+}
+
+/** Ends the current break, returns duration_minutes. */
+export async function endBreak(
+  client: SupabaseClient,
+  sessionId: string,
+): Promise<{ break_id: string; duration_minutes: number }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any).rpc('end_break', {
+    p_session_id: sessionId,
+  })
+  if (error) throw error
+  return data as { break_id: string; duration_minutes: number }
+}
+
+/** Sets (or clears) the site GPS pin and optional per-project fence radius. PM+ only. */
+export async function setProjectLocation(
+  client: SupabaseClient,
+  projectId: string,
+  lat: number,
+  lng: number,
+  radiusMeters?: number | null,
+): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (client as any).rpc('set_project_location', {
+    p_project_id:    projectId,
+    p_lat:           lat,
+    p_lng:           lng,
+    p_radius_meters: radiusMeters ?? null,
+  })
+  if (error) throw error
+}
+
+// ── Time tracking queries ──────────────────────────────────────────────────
+
+/**
+ * Returns the active (or on-break) session for the current user on a project.
+ * Returns null if none.
+ */
+export async function getActiveSession(
+  client: SupabaseClient,
+  projectId: string,
+  userId: string,
+): Promise<WorkSession | null> {
+  const { data, error } = await client
+    .from('work_sessions')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .in('status', ['active', 'on_break'])
+    .maybeSingle()
+
+  if (error) throw error
+  return data as WorkSession | null
+}
+
+/**
+ * Returns all active/on-break sessions for a project — "who's on site" view.
+ * Joins user_profiles for display name + avatar.
+ */
+export async function getActiveSessions(
+  client: SupabaseClient,
+  projectId: string,
+): Promise<WorkSession[]> {
+  const { data, error } = await client
+    .from('work_sessions')
+    .select(`
+      *,
+      user:user_profiles ( first_name, last_name, avatar_url )
+    `)
+    .eq('project_id', projectId)
+    .in('status', ['active', 'on_break'])
+    .order('clocked_in_at', { ascending: true })
+
+  if (error) throw error
+  return (data ?? []) as unknown as WorkSession[]
+}
+
+/**
+ * Returns completed/auto_closed work sessions for a project (history view).
+ * Optional date range filter. Joins user_profiles.
+ */
+export async function getWorkSessions(
+  client: SupabaseClient,
+  projectId: string,
+  opts?: { fromDate?: string; toDate?: string; userId?: string },
+): Promise<WorkSession[]> {
+  let q = client
+    .from('work_sessions')
+    .select(`
+      *,
+      user:user_profiles ( first_name, last_name, avatar_url )
+    `)
+    .eq('project_id', projectId)
+    .in('status', ['completed', 'auto_closed'])
+    .order('clocked_in_at', { ascending: false })
+
+  if (opts?.userId)   q = q.eq('user_id', opts.userId)
+  if (opts?.fromDate) q = q.gte('clocked_in_at', opts.fromDate)
+  if (opts?.toDate)   q = q.lte('clocked_in_at', opts.toDate)
+
+  const { data, error } = await q
+  if (error) throw error
+  return (data ?? []) as unknown as WorkSession[]
+}
+
+/**
+ * Aggregated labor cost summary for a project.
+ * Includes in-progress hours from active sessions (computed client-side as
+ * elapsed time, not OT-broken-down, since they're not yet closed).
+ */
+export async function getProjectLaborCost(
+  client: SupabaseClient,
+  projectId: string,
+): Promise<ProjectLaborSummary> {
+  const { data, error } = await client
+    .from('work_sessions')
+    .select('net_hours, regular_hours, ot_1_5_hours, ot_2_0_hours, labor_cost_cents, status')
+    .eq('project_id', projectId)
+
+  if (error) throw error
+
+  const rows = (data ?? []) as Pick<WorkSession,
+    'net_hours' | 'regular_hours' | 'ot_1_5_hours' | 'ot_2_0_hours' | 'labor_cost_cents' | 'status'>[]
+
+  return rows.reduce<ProjectLaborSummary>(
+    (acc, r) => {
+      if (r.status === 'active' || r.status === 'on_break') {
+        acc.active_session_count++
+      } else {
+        acc.total_net_hours      += r.net_hours      ?? 0
+        acc.total_regular_hours  += r.regular_hours  ?? 0
+        acc.total_ot_1_5_hours   += r.ot_1_5_hours   ?? 0
+        acc.total_ot_2_0_hours   += r.ot_2_0_hours   ?? 0
+        acc.total_labor_cost_cents += r.labor_cost_cents ?? 0
+      }
+      return acc
+    },
+    {
+      total_net_hours: 0, total_regular_hours: 0,
+      total_ot_1_5_hours: 0, total_ot_2_0_hours: 0,
+      total_labor_cost_cents: 0, active_session_count: 0,
+    },
+  )
+}
+
+/** Returns geofence violations for a project (most recent first). */
+export async function getGeofenceViolations(
+  client: SupabaseClient,
+  projectId: string,
+): Promise<GeofenceViolation[]> {
+  const { data, error } = await client
+    .from('geofence_violations')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('attempted_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as GeofenceViolation[]
+}
+
+/**
+ * Returns breaks for an active session (so the UI can show elapsed break time).
+ */
+export async function getSessionBreaks(
+  client: SupabaseClient,
+  sessionId: string,
+): Promise<WorkSessionBreak[]> {
+  const { data, error } = await client
+    .from('work_session_breaks')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('started_at', { ascending: true })
+
+  if (error) throw error
+  return (data ?? []) as WorkSessionBreak[]
+}
+
+// ── Wage management ────────────────────────────────────────────────────────
+
+/**
+ * Creates or replaces a wage record for a user on a given effective date.
+ * Uses upsert on (tenant_id, user_id, effective_date).
+ */
+export async function upsertEmployeeWage(
+  client: SupabaseClient,
+  tenantId: string,
+  userId: string,
+  effectiveDate: string,
+  hourlyRateCents: number,
+  createdBy: string,
+): Promise<{ id: string }> {
+  const { data, error } = await client
+    .from('employee_wages')
+    .upsert({
+      tenant_id:         tenantId,
+      user_id:           userId,
+      effective_date:    effectiveDate,
+      hourly_rate_cents: hourlyRateCents,
+      created_by:        createdBy,
+    } as unknown as never, { onConflict: 'tenant_id,user_id,effective_date' })
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
+
+/**
+ * Returns all wage history for a user within a tenant, newest first.
+ */
+export async function getEmployeeWages(
+  client: SupabaseClient,
+  tenantId: string,
+  userId: string,
+): Promise<EmployeeWage[]> {
+  const { data, error } = await client
+    .from('employee_wages')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('user_id', userId)
+    .order('effective_date', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as EmployeeWage[]
+}
+
+/**
+ * Updates the tenant-wide default geofence radius.
+ * Requires the caller to be PM+ (enforced client-side; DB has no direct
+ * policy on updating tenants, so call from a trusted context only).
+ */
+export async function setTenantGeofenceDefault(
+  client: SupabaseClient,
+  tenantId: string,
+  radiusMeters: number,
+): Promise<void> {
+  const { error } = await client
+    .from('tenants')
+    .update({ default_geofence_radius_meters: radiusMeters } as unknown as never)
+    .eq('id', tenantId)
+  if (error) throw error
+}
