@@ -1477,26 +1477,57 @@ function InvoicesSection({ invoices }: { invoices: ProjectInvoice[] }) {
 
           <div className="divide-y divide-gray-100">
             {invoices.map((inv) => (
+              // Desktop: 5 explicit cols → INVOICE | DATE | TOTAL | PAID | BALANCE
+              // Mobile:  2 cols — invoice+date on top row, money summary below
               <div key={inv.id} className="grid grid-cols-2 gap-x-4 gap-y-1 px-5 py-3 lg:grid-cols-5 lg:items-center">
+
+                {/* Col 1 — INVOICE: number + status badge */}
                 <div>
                   <p className="text-sm font-semibold text-gray-800">{inv.invoice_number}</p>
+                  <div className="mt-0.5">
+                    <StatusBadge status={inv.invoice_status} map={INVOICE_STATUS} />
+                  </div>
                 </div>
+
+                {/* Col 2 — DATE */}
                 <div className="text-right lg:text-left">
-                  <StatusBadge status={inv.invoice_status} map={INVOICE_STATUS} />
-                </div>
-                <div className="lg:hidden" />
-                <div>
-                  <p className="text-[10px] text-gray-400 lg:hidden">Date</p>
                   <p className="text-sm text-gray-700">{fmtDate(inv.invoice_date)}</p>
+                  {inv.due_date && (
+                    <p className="text-[10px] text-gray-400">Due {fmtDate(inv.due_date)}</p>
+                  )}
                 </div>
-                <div className="col-span-2 mt-1 grid grid-cols-3 gap-2 lg:col-span-3 lg:mt-0">
+
+                {/* Cols 3-5 — TOTAL / PAID / BALANCE — one col each on desktop, hidden on mobile */}
+                <div className="hidden lg:block">
+                  <p className="text-sm font-semibold tabular-nums text-gray-900">
+                    {formatMoney(inv.total_cents)}
+                  </p>
+                </div>
+                <div className="hidden lg:block">
+                  <p className="text-sm tabular-nums text-gray-700">
+                    {formatMoney(inv.amount_paid_cents)}
+                  </p>
+                </div>
+                <div className="hidden lg:block">
+                  <p className={`text-sm tabular-nums ${
+                    inv.balance_due_cents > 0 && inv.invoice_status === 'overdue'
+                      ? 'font-semibold text-red-700'
+                      : 'text-gray-700'
+                  }`}>
+                    {formatMoney(inv.balance_due_cents)}
+                  </p>
+                </div>
+
+                {/* Mobile-only: show money values in a sub-row spanning both cols */}
+                <div className="col-span-2 mt-1 grid grid-cols-3 gap-2 lg:hidden">
                   {[
-                    { label: 'Total',   value: formatMoney(inv.total_cents),        bold: true  },
-                    { label: 'Paid',    value: formatMoney(inv.amount_paid_cents),   bold: false },
-                    { label: 'Balance', value: formatMoney(inv.balance_due_cents),   warn: inv.balance_due_cents > 0 && inv.invoice_status === 'overdue' },
+                    { label: 'Total',   value: formatMoney(inv.total_cents),        bold: true,  warn: false },
+                    { label: 'Paid',    value: formatMoney(inv.amount_paid_cents),   bold: false, warn: false },
+                    { label: 'Balance', value: formatMoney(inv.balance_due_cents),   bold: false,
+                      warn: inv.balance_due_cents > 0 && inv.invoice_status === 'overdue' },
                   ].map((item) => (
                     <div key={item.label}>
-                      <p className="text-[10px] text-gray-400 lg:hidden">{item.label}</p>
+                      <p className="text-[10px] text-gray-400">{item.label}</p>
                       <p className={`text-sm tabular-nums ${
                         item.warn ? 'font-semibold text-red-700' :
                         item.bold ? 'font-semibold text-gray-900' :
@@ -1507,6 +1538,7 @@ function InvoicesSection({ invoices }: { invoices: ProjectInvoice[] }) {
                     </div>
                   ))}
                 </div>
+
               </div>
             ))}
           </div>
