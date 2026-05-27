@@ -61,7 +61,7 @@ ALTER TABLE project_inspections ENABLE ROW LEVEL SECURITY;
 -- Tenant members can read all inspections for their tenant
 CREATE POLICY "tenant members read inspections"
   ON project_inspections FOR SELECT
-  USING (tenant_id = ANY(get_user_tenant_ids()));
+  USING (tenant_id IN (SELECT get_user_tenant_ids()));
 
 -- PM / field_super / owner / admin can insert
 CREATE POLICY "pm+ insert inspections"
