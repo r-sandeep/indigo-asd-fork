@@ -356,6 +356,101 @@ export async function getProjectDrawSchedule(
 
 // ── Client invoices ────────────────────────────────────────────────────────
 
+// ── Invoice-trigger milestones ─────────────────────────────────────────────
+
+export type InvoiceTriggerState = 'pending' | 'ready' | 'invoiced'
+
+export interface InvoiceTriggerMilestone {
+  id:                   string
+  project_id:           string
+  phase_id:             string | null
+  name:                 string
+  status:               string
+  due_date:             string | null
+  completed_date:       string | null
+  sequence:             number
+  /** PM-configured billing amount in cents; null = not yet set */
+  invoice_amount_cents: number | null
+  /** Derived from linked invoice header, if any */
+  invoice_id:           string | null
+  invoice_number:       string | null
+  invoice_status:       string | null
+}
+
+/** Derives display state from the milestone + invoice linkage. */
+export function getInvoiceTriggerState(m: InvoiceTriggerMilestone): InvoiceTriggerState {
+  if (m.invoice_id) return 'invoiced'
+  if (m.status === 'complete' || m.status === 'approved') return 'ready'
+  return 'pending'
+}
+
+/**
+ * Returns all milestones with triggers_invoice = true for a project,
+ * each decorated with the invoice header that references it (if any).
+ * Uses the invoices.milestone_id FK to detect invoiced state.
+ */
+export async function getInvoiceTriggerMilestones(
+  client: SupabaseClient,
+  projectId: string,
+): Promise<InvoiceTriggerMilestone[]> {
+  const { data, error } = await client
+    .from('milestones')
+    .select(`
+      id, project_id, phase_id, name, status,
+      due_date, completed_date, sequence, invoice_amount_cents,
+      invoices!milestone_id ( id, invoice_number, invoice_status )
+    `)
+    .eq('project_id', projectId)
+    .eq('triggers_invoice', true)
+    .order('sequence', { ascending: true })
+
+  if (error) throw error
+
+  type Raw = {
+    id: string; project_id: string; phase_id: string | null
+    name: string; status: string; due_date: string | null
+    completed_date: string | null; sequence: number
+    invoice_amount_cents: number | null
+    invoices: Array<{ id: string; invoice_number: string; invoice_status: string }> | null
+  }
+
+  return ((data ?? []) as unknown as Raw[]).map((row) => {
+    const inv = row.invoices?.[0] ?? null
+    return {
+      id:                   row.id,
+      project_id:           row.project_id,
+      phase_id:             row.phase_id,
+      name:                 row.name,
+      status:               row.status,
+      due_date:             row.due_date,
+      completed_date:       row.completed_date,
+      sequence:             row.sequence,
+      invoice_amount_cents: row.invoice_amount_cents,
+      invoice_id:           inv?.id           ?? null,
+      invoice_number:       inv?.invoice_number ?? null,
+      invoice_status:       inv?.invoice_status ?? null,
+    }
+  })
+}
+
+/**
+ * Sets the billing amount for a single invoice-trigger milestone.
+ * Pass null to clear it.
+ */
+export async function updateMilestoneInvoiceAmount(
+  client: SupabaseClient,
+  milestoneId: string,
+  tenantId: string,
+  amountCents: number | null,
+): Promise<void> {
+  const { error } = await client
+    .from('milestones')
+    .update({ invoice_amount_cents: amountCents } as unknown as never)
+    .eq('id', milestoneId)
+    .eq('tenant_id', tenantId)
+  if (error) throw error
+}
+
 export async function getProjectInvoices(
   client: SupabaseClient,
   jobId: string,

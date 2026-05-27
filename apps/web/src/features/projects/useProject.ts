@@ -5,6 +5,7 @@ import {
   getProjectChangeOrders,
   getProjectDrawSchedule,
   getProjectInvoices,
+  getInvoiceTriggerMilestones,
   getProjectDocuments,
   getProjectFieldData,
   getProjectSubcontracts,
@@ -63,6 +64,15 @@ export function useProjectInvoices(jobId: string | undefined) {
     queryFn:   () => getProjectInvoices(supabase, jobId!, activeTenantId!),
     enabled:   !!jobId && !!activeTenantId,
     staleTime: 60_000,
+  })
+}
+
+export function useInvoiceTriggerMilestones(projectId: string | undefined) {
+  return useQuery({
+    queryKey:  ['invoice-trigger-milestones', projectId],
+    queryFn:   () => getInvoiceTriggerMilestones(supabase, projectId!),
+    enabled:   !!projectId,
+    staleTime: 30_000,
   })
 }
 

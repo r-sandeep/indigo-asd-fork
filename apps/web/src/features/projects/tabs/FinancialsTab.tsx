@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { useRef, useState } from 'react'
+import { useOutletContext, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type {
   ProjectRow,
@@ -7,6 +7,7 @@ import type {
   ProjectDrawRequest,
   ProjectDrawSchedule,
   ProjectInvoice,
+  InvoiceTriggerMilestone,
   CreateChangeOrderInput,
   UpdateChangeOrderInput,
   CreateDrawScheduleInput,
@@ -19,17 +20,21 @@ import {
   withdrawChangeOrder,
   createDrawSchedule,
   createDrawRequest,
+  updateMilestoneInvoiceAmount,
+  getInvoiceTriggerState,
 } from '@indigo/shared'
 import {
   useProjectChangeOrders,
   useProjectDrawSchedule,
   useProjectInvoices,
+  useInvoiceTriggerMilestones,
 } from '../useProject'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/stores/toastStore'
 import { Skeleton } from '@/components/ui/Skeleton'
 import {
+  CheckIcon,
   ExclamationTriangleIcon,
   PencilIcon,
   PlusIcon,
@@ -995,6 +1000,276 @@ function DrawRow({ draw }: { draw: ProjectDrawRequest }) {
 
 // ── Invoices ───────────────────────────────────────────────────────────────
 
+// ── Invoice milestones section ─────────────────────────────────────────────
+
+const TRIGGER_STATE_CFG = {
+  pending:  { label: 'Pending',           cls: 'bg-gray-100 text-gray-500'  },
+  ready:    { label: 'Ready to Invoice',  cls: 'bg-amber-50 text-amber-700' },
+  invoiced: { label: 'Invoiced',          cls: 'bg-green-50 text-green-700' },
+}
+
+/** Inline-editable dollar amount cell. Shows formatted value; pencil opens an input. */
+function AmountCell({
+  milestoneId,
+  tenantId,
+  amountCents,
+  canEdit,
+  onSaved,
+}: {
+  milestoneId: string
+  tenantId:    string
+  amountCents: number | null
+  canEdit:     boolean
+  onSaved:     () => void
+}) {
+  const toast       = useToast()
+  const [editing, setEditing] = useState(false)
+  const [draft,   setDraft]   = useState('')
+  const inputRef  = useRef<HTMLInputElement>(null)
+
+  const mutation = useMutation({
+    mutationFn: (cents: number | null) =>
+      updateMilestoneInvoiceAmount(supabase, milestoneId, tenantId, cents),
+    onSuccess: () => { onSaved(); setEditing(false) },
+    onError: (err) => {
+      toast.error('Failed to save amount', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  function startEdit() {
+    setDraft(amountCents != null ? (amountCents / 100).toFixed(2) : '')
+    setEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  function commit() {
+    if (draft.trim() === '') {
+      mutation.mutate(null)
+    } else {
+      const n = parseFloat(draft.replace(/,/g, ''))
+      if (isNaN(n) || n < 0) { setEditing(false); return }
+      mutation.mutate(Math.round(n * 100))
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter')  { e.preventDefault(); commit() }
+    if (e.key === 'Escape') { setEditing(false) }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <span className="text-gray-400 text-sm">$</span>
+        <input
+          ref={inputRef}
+          type="number"
+          step="0.01"
+          min="0"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={handleKeyDown}
+          disabled={mutation.isPending}
+          className="w-24 rounded-lg border border-brand-400 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-100 tabular-nums"
+          placeholder="0.00"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="group/amt flex items-center gap-1.5">
+      <span className={`text-sm tabular-nums font-medium ${amountCents != null ? 'text-gray-900' : 'text-gray-400'}`}>
+        {amountCents != null ? formatMoney(amountCents) : '—'}
+      </span>
+      {canEdit && (
+        <button
+          type="button"
+          onClick={startEdit}
+          className="opacity-0 group-hover/amt:opacity-100 rounded p-0.5 text-gray-400 hover:text-brand-600 transition-opacity"
+          title="Edit amount"
+        >
+          <PencilIcon className="h-3 w-3" strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function InvoiceMilestonesSection({
+  milestones,
+  tenantId,
+  canEdit,
+  onRefresh,
+}: {
+  milestones: InvoiceTriggerMilestone[]
+  tenantId:   string
+  canEdit:    boolean
+  onRefresh:  () => void
+}) {
+  const totalConfigured = milestones.reduce((s, m) => s + (m.invoice_amount_cents ?? 0), 0)
+  const readyMilestones = milestones.filter((m) => getInvoiceTriggerState(m) === 'ready')
+  const readyAmount     = readyMilestones.reduce((s, m) => s + (m.invoice_amount_cents ?? 0), 0)
+  const invoicedAmount  = milestones
+    .filter((m) => getInvoiceTriggerState(m) === 'invoiced')
+    .reduce((s, m) => s + (m.invoice_amount_cents ?? 0), 0)
+
+  const missingAmount   = milestones.some((m) => m.invoice_amount_cents == null)
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-card">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Invoice Milestones</h2>
+          <p className="mt-0.5 text-xs text-gray-400">
+            {milestones.length} milestone{milestones.length !== 1 ? 's' : ''} flagged to trigger invoicing
+          </p>
+        </div>
+        {readyMilestones.length > 0 && (
+          <div className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5">
+            <ExclamationTriangleIcon className="h-3.5 w-3.5 text-amber-500" strokeWidth={2} />
+            <span className="text-xs font-medium text-amber-700">
+              {readyMilestones.length} ready to invoice
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Summary strip */}
+      {milestones.length > 0 && (
+        <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
+          {[
+            { label: 'Configured',        value: totalConfigured, warn: missingAmount },
+            { label: 'Ready to Invoice',  value: readyAmount,     highlight: readyMilestones.length > 0 },
+            { label: 'Already Invoiced',  value: invoicedAmount   },
+          ].map(({ label, value, warn, highlight }) => (
+            <div key={label} className="px-5 py-3 text-center">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">{label}</p>
+              <p className={`mt-1 text-base font-semibold tabular-nums ${
+                highlight ? 'text-amber-700' : 'text-gray-900'
+              }`}>
+                {formatMoney(value)}
+              </p>
+              {warn && (
+                <p className="mt-0.5 text-[10px] text-amber-600">some amounts not set</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Milestone rows */}
+      {milestones.length === 0 ? (
+        <div className="px-5 py-10 text-center">
+          <p className="text-sm text-gray-400">
+            No milestones are flagged to trigger invoicing.
+          </p>
+          <p className="mt-1 text-xs text-gray-400">
+            Set "Triggers invoice" on a milestone in the Schedule tab.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Column headers */}
+          <div className="hidden grid-cols-12 gap-4 border-b border-gray-100 px-5 py-2 lg:grid">
+            {['Milestone', 'Due', 'Status', 'Amount', 'Invoice'].map((h) => (
+              <p key={h} className={`text-[11px] font-semibold uppercase tracking-wider text-gray-400 ${
+                h === 'Milestone' ? 'col-span-4' :
+                h === 'Amount'   ? 'col-span-2' :
+                h === 'Invoice'  ? 'col-span-2' :
+                                   'col-span-2'
+              }`}>{h}</p>
+            ))}
+          </div>
+
+          <div className="divide-y divide-gray-100">
+            {milestones.map((m) => {
+              const state   = getInvoiceTriggerState(m)
+              const stateCfg = TRIGGER_STATE_CFG[state]
+              const isReady = state === 'ready'
+
+              return (
+                <div
+                  key={m.id}
+                  className={`grid grid-cols-2 gap-x-4 gap-y-1.5 px-5 py-3.5 lg:grid-cols-12 lg:items-center ${
+                    isReady ? 'border-l-2 border-amber-400 bg-amber-50/30' : ''
+                  }`}
+                >
+                  {/* Name */}
+                  <div className="col-span-2 lg:col-span-4">
+                    <p className="text-sm font-medium text-gray-900 truncate">{m.name}</p>
+                    {m.due_date && (
+                      <p className="text-xs text-gray-400 lg:hidden">
+                        Due {new Date(m.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Due date (desktop) */}
+                  <div className="hidden lg:col-span-2 lg:block">
+                    <p className="text-sm text-gray-500">
+                      {m.due_date
+                        ? new Date(m.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+                        : '—'}
+                    </p>
+                  </div>
+
+                  {/* Milestone status */}
+                  <div className="lg:col-span-2">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${stateCfg.cls}`}>
+                      {state === 'invoiced' && <CheckIcon className="mr-1 h-2.5 w-2.5" strokeWidth={2.5} />}
+                      {stateCfg.label}
+                    </span>
+                  </div>
+
+                  {/* Amount */}
+                  <div className="lg:col-span-2">
+                    <AmountCell
+                      milestoneId={m.id}
+                      tenantId={tenantId}
+                      amountCents={m.invoice_amount_cents}
+                      canEdit={canEdit && state !== 'invoiced'}
+                      onSaved={onRefresh}
+                    />
+                  </div>
+
+                  {/* Invoice link */}
+                  <div className="col-span-2 lg:col-span-2">
+                    {m.invoice_number ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-gray-700">{m.invoice_number}</span>
+                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          INVOICE_STATUS[m.invoice_status ?? '']?.bg ?? 'bg-gray-100'
+                        } ${INVOICE_STATUS[m.invoice_status ?? '']?.color ?? 'text-gray-500'}`}>
+                          {INVOICE_STATUS[m.invoice_status ?? '']?.label ?? m.invoice_status}
+                        </span>
+                      </div>
+                    ) : state === 'ready' ? (
+                      <span className="text-xs font-medium text-amber-600">Awaiting invoice</span>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {canEdit && (
+            <div className="border-t border-gray-100 bg-gray-50 px-5 py-2.5">
+              <p className="text-xs text-gray-400">
+                Click the amount to edit. Amounts are locked once a milestone is invoiced.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function InvoicesSection({ invoices }: { invoices: ProjectInvoice[] }) {
   const totalBilled  = invoices.reduce((s, i) => s + i.total_cents, 0)
   const totalPaid    = invoices.reduce((s, i) => s + i.amount_paid_cents, 0)
@@ -1124,7 +1399,8 @@ type FinancialModal =
 
 export function FinancialsTab() {
   const { project, isLoading: projectLoading } = useOutletContext<OutletCtx>()
-  const { activeTenantId, user } = useAuth()
+  const { id: projectId } = useParams<{ id: string }>()
+  const { activeTenantId, user, tenantMemberships } = useAuth()
   const queryClient = useQueryClient()
   const toast = useToast()
 
@@ -1133,13 +1409,20 @@ export function FinancialsTab() {
   const userId     = user?.id ?? ''
   const jobHasLoan = project?.job?.has_construction_loan ?? false
 
-  const { data: changeOrders, isLoading: cosLoading } = useProjectChangeOrders(jobId)
-  const { data: drawSchedule, isLoading: drawLoading } = useProjectDrawSchedule(jobId)
-  const { data: invoices,     isLoading: invLoading  } = useProjectInvoices(jobId)
+  const { data: changeOrders,       isLoading: cosLoading  } = useProjectChangeOrders(jobId)
+  const { data: drawSchedule,       isLoading: drawLoading } = useProjectDrawSchedule(jobId)
+  const { data: invoices,           isLoading: invLoading  } = useProjectInvoices(jobId)
+  const { data: invoiceMilestones,  isLoading: imLoading   } = useInvoiceTriggerMilestones(projectId)
 
   const [modal, setModal] = useState<FinancialModal>({ type: 'none' })
 
-  const isLoading = projectLoading || cosLoading || drawLoading || invLoading
+  const isLoading = projectLoading || cosLoading || drawLoading || invLoading || imLoading
+
+  // PM+ can set invoice amounts
+  const canEditInvoiceAmounts = (() => {
+    const m = tenantMemberships.find((m) => m.tenant_id === tenantId)
+    return ['owner', 'admin', 'project_manager'].includes(m?.role ?? '')
+  })()
 
   const withdrawMut = useMutation({
     mutationFn: (co: ProjectChangeOrder) => withdrawChangeOrder(supabase, co.id),
@@ -1166,6 +1449,9 @@ export function FinancialsTab() {
 
   function refreshCOs()    { void queryClient.invalidateQueries({ queryKey: ['project-change-orders', jobId] }) }
   function refreshDraws()  { void queryClient.invalidateQueries({ queryKey: ['project-draw-schedule',  jobId] }) }
+  function refreshInvoiceMilestones() {
+    void queryClient.invalidateQueries({ queryKey: ['invoice-trigger-milestones', projectId] })
+  }
 
   return (
     <div className="space-y-4 px-5 py-6 lg:px-8">
@@ -1188,6 +1474,13 @@ export function FinancialsTab() {
         jobHasLoan={jobHasLoan}
         onSetUpSchedule={() => setModal({ type: 'create-draw-schedule' })}
         onSubmitDraw={() => setModal({ type: 'submit-draw' })}
+      />
+
+      <InvoiceMilestonesSection
+        milestones={invoiceMilestones ?? []}
+        tenantId={tenantId}
+        canEdit={canEditInvoiceAmounts}
+        onRefresh={refreshInvoiceMilestones}
       />
 
       <InvoicesSection invoices={invs} />
