@@ -2087,3 +2087,108 @@ export async function getEmployeeSessions(
   if (error) throw error
   return (data ?? []) as unknown as WorkSession[]
 }
+
+// ── Unified project details write ─────────────────────────────────────────
+
+/**
+ * Fields that live on the `jobs` table and are safe for Indigo to write.
+ *
+ * Excluded (BB-owned with check constraints or owned by BB workflows):
+ *   - jobs.status           → has check constraint, owned by BB
+ *   - jobs.job_type         → has check constraint, owned by BB
+ *   - jobs.contract_amount_cents / contract_value_cents → owned by BB contracts
+ */
+export interface UpdateJobsInput {
+  job_name?:               string
+  description?:            string | null
+  notes?:                  string | null
+  internal_notes?:         string | null
+  tags?:                   string[]
+  start_date?:             string | null
+  target_completion?:      string | null
+  actual_completion?:      string | null
+  address_line1?:          string | null
+  address_line2?:          string | null
+  city?:                   string | null
+  state?:                  string | null
+  zip?:                    string | null
+  pm_user_id?:             string | null
+  superintendent_user_id?: string | null
+  package_name?:           string | null
+  /** Indigo-extended lifecycle status */
+  project_status?:         string | null
+  /** Indigo-extended project type */
+  project_type?:           string | null
+  /** Indigo-managed running contract total */
+  current_contract_cents?: number | null
+  has_construction_loan?:  boolean
+  lender_name?:            string | null
+  loan_amount_cents?:      number | null
+  permit_number?:          string | null
+  permit_issued_date?:     string | null
+  permit_expiry_date?:     string | null
+}
+
+/**
+ * Fields that live on the `projects` table (Indigo-owned).
+ */
+export interface UpdateProjectsInput {
+  site_lat?:                 number | null
+  site_lng?:                 number | null
+  geofence_radius_meters?:   number | null
+}
+
+/**
+ * Combined input for the unified write path.
+ * Pass only the fields you want to change — undefined fields are skipped.
+ */
+export interface UpdateProjectDetailsInput {
+  jobs?:     UpdateJobsInput
+  projects?: UpdateProjectsInput
+}
+
+/**
+ * Unified project-details writer. Routes `jobs`-owned fields and
+ * `projects`-owned fields to the correct tables in parallel.
+ *
+ * - Only issues a DB call for a table if its sub-object has at least one key.
+ * - Never writes BB-protected fields (status, job_type, contract_amount_cents,
+ *   contract_value_cents) — those are intentionally excluded from the input type.
+ *
+ * @param projectId  The Indigo `projects.id`
+ * @param jobId      The `jobs.id` linked via projects.job_id
+ * @param input      Partial update broken down by table
+ */
+export async function updateProjectDetails(
+  client: SupabaseClient,
+  projectId: string,
+  jobId: string,
+  input: UpdateProjectDetailsInput,
+): Promise<void> {
+  const tasks: Promise<void>[] = []
+
+  if (input.jobs && Object.keys(input.jobs).length > 0) {
+    tasks.push(
+      Promise.resolve(
+        client
+          .from('jobs')
+          .update(input.jobs as unknown as never)
+          .eq('id', jobId),
+      ).then(({ error }) => { if (error) throw error }),
+    )
+  }
+
+  if (input.projects && Object.keys(input.projects).length > 0) {
+    tasks.push(
+      Promise.resolve(
+        client
+          .from('projects')
+          .update(input.projects as unknown as never)
+          .eq('id', projectId),
+      ).then(({ error }) => { if (error) throw error }),
+    )
+  }
+
+  if (tasks.length === 0) return   // nothing to update
+  await Promise.all(tasks)
+}
