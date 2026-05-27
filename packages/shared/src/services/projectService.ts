@@ -1797,3 +1797,129 @@ export async function setTenantGeofenceDefault(
     .eq('id', tenantId)
   if (error) throw error
 }
+
+// ── Permit ──────────────────────────────────────────────────────────────────
+
+export interface PermitInput {
+  permit_number:       string | null
+  permit_issued_date:  string | null
+  permit_expiry_date:  string | null
+}
+
+/**
+ * Updates the permit fields on the jobs row associated with a project.
+ * These columns (permit_number, permit_issued_date, permit_expiry_date) were
+ * added by Indigo migration 001 and are safe to write from Indigo.
+ */
+export async function updateJobPermit(
+  client: SupabaseClient,
+  jobId: string,
+  input: PermitInput,
+): Promise<void> {
+  const { error } = await client
+    .from('jobs')
+    .update(input as unknown as never)
+    .eq('id', jobId)
+  if (error) throw error
+}
+
+// ── Inspections ─────────────────────────────────────────────────────────────
+
+export type InspectionResult = 'pending' | 'passed' | 'failed' | 'cancelled'
+
+export interface ProjectInspection {
+  id:                   string
+  tenant_id:            string
+  project_id:           string
+  inspection_type:      string
+  scheduled_date:       string | null
+  completed_date:       string | null
+  result:               InspectionResult
+  inspector_name:       string | null
+  certificate_number:   string | null
+  correction_required:  boolean
+  correction_resolved:  boolean
+  notes:                string | null
+  created_by:           string | null
+  created_at:           string
+  updated_at:           string
+}
+
+export interface UpsertInspectionInput {
+  id?:                  string
+  inspection_type:      string
+  scheduled_date:       string | null
+  completed_date:       string | null
+  result:               InspectionResult
+  inspector_name:       string | null
+  certificate_number:   string | null
+  correction_required:  boolean
+  correction_resolved:  boolean
+  notes:                string | null
+}
+
+/**
+ * Lists all inspections for a project, sorted by scheduled_date desc then created_at desc.
+ */
+export async function getProjectInspections(
+  client: SupabaseClient,
+  projectId: string,
+): Promise<ProjectInspection[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any)
+    .from('project_inspections')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('scheduled_date', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as ProjectInspection[]
+}
+
+/**
+ * Creates or updates a project inspection record.
+ * Pass `id` in the input to update; omit to insert.
+ */
+export async function upsertInspection(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  input: UpsertInspectionInput,
+  createdBy: string,
+): Promise<ProjectInspection> {
+  const payload = {
+    ...input,
+    tenant_id:  tenantId,
+    project_id: projectId,
+    created_by: createdBy,
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any)
+    .from('project_inspections')
+    .upsert(payload, { onConflict: 'id' })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as ProjectInspection
+}
+
+/**
+ * Deletes a single inspection by id.
+ */
+export async function deleteInspection(
+  client: SupabaseClient,
+  inspectionId: string,
+  tenantId: string,
+): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (client as any)
+    .from('project_inspections')
+    .delete()
+    .eq('id', inspectionId)
+    .eq('tenant_id', tenantId)
+
+  if (error) throw error
+}

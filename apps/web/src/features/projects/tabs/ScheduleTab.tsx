@@ -740,6 +740,9 @@ function PhaseCard({
 
 // ── Gantt view ─────────────────────────────────────────────────────────────
 
+const LEFT_COL_W = 180
+const PX_PER_DAY = 14   // pixels per calendar day — adjust for zoom feel
+
 function GanttView({ phases }: { phases: ProjectPhase[] }) {
   const sorted = [...phases].sort((a, b) => a.sequence - b.sequence)
 
@@ -771,104 +774,124 @@ function GanttView({ phases }: { phases: ProjectPhase[] }) {
   minDate.setDate(minDate.getDate() - 14)
   maxDate.setDate(maxDate.getDate() + 14)
 
-  const totalMs = maxDate.getTime() - minDate.getTime()
+  const totalMs   = maxDate.getTime() - minDate.getTime()
+  const totalDays = Math.ceil(totalMs / 86_400_000)
+  const CHART_W   = Math.max(600, totalDays * PX_PER_DAY)
 
-  function toPct(dateStr: string | null | undefined, offsetDays = 0): number {
+  /** Convert a date string to a pixel offset within the chart area. */
+  function toPx(dateStr: string | null | undefined, offsetDays = 0): number {
     if (!dateStr) return -1
     const d = new Date(dateStr + 'T00:00:00')
     d.setDate(d.getDate() + offsetDays)
-    return Math.max(0, Math.min(100, ((d.getTime() - minDate.getTime()) / totalMs) * 100))
+    const ratio = (d.getTime() - minDate.getTime()) / totalMs
+    return Math.max(0, Math.min(CHART_W, Math.round(ratio * CHART_W)))
   }
 
-  const months: { label: string; pct: number }[] = []
+  const months: { label: string; px: number }[] = []
   const cur = new Date(minDate)
   cur.setDate(1)
   if (cur < minDate) cur.setMonth(cur.getMonth() + 1)
   while (cur <= maxDate) {
-    const p = ((cur.getTime() - minDate.getTime()) / totalMs) * 100
-    months.push({ label: fmtMonthYear(cur), pct: p })
+    const px = Math.round(((cur.getTime() - minDate.getTime()) / totalMs) * CHART_W)
+    months.push({ label: fmtMonthYear(cur), px })
     cur.setMonth(cur.getMonth() + 1)
   }
 
   const today     = new Date()
-  const todayPct  = ((today.getTime() - minDate.getTime()) / totalMs) * 100
-  const showToday = todayPct >= 0 && todayPct <= 100
-  const LEFT_COL_W = 180
+  const todayPx   = Math.round(((today.getTime() - minDate.getTime()) / totalMs) * CHART_W)
+  const showToday = todayPx >= 0 && todayPx <= CHART_W
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
+      {/* Horizontal scroll wraps everything */}
       <div className="overflow-x-auto">
-        <div style={{ minWidth: 600 }}>
+        <div style={{ minWidth: LEFT_COL_W + CHART_W }}>
+
+          {/* ── Header row ───────────────────────────────────────────── */}
           <div className="flex border-b border-gray-200 bg-gray-50">
             <div className="shrink-0 border-r border-gray-200 px-4 py-2.5" style={{ width: LEFT_COL_W }}>
               <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Phase</span>
             </div>
-            <div className="relative flex-1 overflow-hidden py-2.5" style={{ height: 32 }}>
+            <div className="relative overflow-hidden py-2.5" style={{ width: CHART_W, height: 32 }}>
               {months.map((m) => (
-                <span key={m.label} className="absolute text-[10px] font-medium text-gray-400"
-                  style={{ left: `${m.pct}%`, transform: 'translateX(-4px)' }}>
+                <span key={m.label} className="absolute whitespace-nowrap text-[10px] font-medium text-gray-400"
+                  style={{ left: m.px, transform: 'translateX(-4px)' }}>
                   {m.label}
                 </span>
               ))}
             </div>
           </div>
 
-          {sorted.map((phase) => {
-            const accentColor = phase.color ?? PHASE_ACCENT[phase.status] ?? '#d1d5db'
-            const cfg         = PHASE_STATUS[phase.status] ?? PHASE_STATUS.not_started
-            const hasBar      = !!(phase.start_date && phase.end_date)
-            const barLeft     = hasBar ? toPct(phase.start_date) : -1
-            const barRight    = hasBar ? toPct(phase.end_date, 1) : -1
-            const barWidth    = hasBar ? Math.max(barRight - barLeft, 0.5) : 0
-            const milestones  = phase.milestones.filter((m) => m.due_date)
+          {/* ── Phase rows — vertically scrollable ───────────────────── */}
+          <div className="max-h-[60vh] overflow-y-auto">
+            {sorted.map((phase) => {
+              const accentColor = phase.color ?? PHASE_ACCENT[phase.status] ?? '#d1d5db'
+              const cfg         = PHASE_STATUS[phase.status] ?? PHASE_STATUS.not_started
+              const hasBar      = !!(phase.start_date && phase.end_date)
+              const barLeft     = hasBar ? toPx(phase.start_date) : -1
+              const barRight    = hasBar ? toPx(phase.end_date, 1) : -1
+              const barWidth    = hasBar ? Math.max(barRight - barLeft, 4) : 0
+              const milestones  = phase.milestones.filter((m) => m.due_date)
 
-            return (
-              <div key={phase.id} className="flex border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
-                <div className="flex shrink-0 flex-col justify-center border-r border-gray-100 px-4 py-3" style={{ width: LEFT_COL_W }}>
-                  <span className="truncate text-xs font-semibold text-gray-800">{phase.name}</span>
-                  <span className={`mt-0.5 text-[10px] font-medium ${cfg.color}`}>{cfg.label}</span>
+              return (
+                <div key={phase.id} className="flex border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
+                  <div className="flex shrink-0 flex-col justify-center border-r border-gray-100 px-4 py-3" style={{ width: LEFT_COL_W }}>
+                    <span className="truncate text-xs font-semibold text-gray-800">{phase.name}</span>
+                    <span className={`mt-0.5 text-[10px] font-medium ${cfg.color}`}>{cfg.label}</span>
+                  </div>
+                  <div className="relative" style={{ width: CHART_W, minHeight: 52 }}>
+                    {/* Month grid lines */}
+                    {months.map((m) => (
+                      <div key={m.label} className="absolute inset-y-0 w-px bg-gray-100" style={{ left: m.px }} />
+                    ))}
+                    {/* Today line */}
+                    {showToday && (
+                      <div className="absolute inset-y-0 w-px bg-red-300" style={{ left: todayPx }} />
+                    )}
+                    {/* Phase duration bar */}
+                    {hasBar && (
+                      <div
+                        className="absolute top-1/2 h-6 -translate-y-1/2 rounded-md"
+                        style={{ left: barLeft, width: barWidth, backgroundColor: accentColor, opacity: 0.85 }}
+                      />
+                    )}
+                    {/* Milestone diamonds */}
+                    {milestones.map((m) => {
+                      const mp      = toPx(m.due_date)
+                      if (mp < 0) return null
+                      const done    = m.status === 'complete' || m.status === 'approved'
+                      const overdue = isOverdue(m.due_date, m.completed_date)
+                      const color   = done ? '#16a34a' : overdue ? '#f59e0b' : m.status === 'blocked' ? '#ef4444' : '#6366f1'
+                      return (
+                        <div
+                          key={m.id}
+                          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-default"
+                          style={{ left: mp }}
+                          title={`${m.name} — Due ${fmtDateShort(m.due_date)}${done ? ' ✓' : overdue ? ' (overdue)' : ''}`}
+                        >
+                          <div className="h-3.5 w-3.5 rotate-45 rounded-sm ring-2 ring-white" style={{ backgroundColor: color }} />
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div className="relative flex-1" style={{ minHeight: 52 }}>
-                  {months.map((m) => (
-                    <div key={m.label} className="absolute inset-y-0 w-px bg-gray-100" style={{ left: `${m.pct}%` }} />
-                  ))}
-                  {showToday && (
-                    <div className="absolute inset-y-0 w-px bg-red-300" style={{ left: `${todayPct}%` }} />
-                  )}
-                  {hasBar && (
-                    <div className="absolute top-1/2 h-6 -translate-y-1/2 rounded-md"
-                      style={{ left: `${barLeft}%`, width: `${barWidth}%`, backgroundColor: accentColor, opacity: 0.85 }} />
-                  )}
-                  {milestones.map((m) => {
-                    const mp    = toPct(m.due_date)
-                    if (mp < 0) return null
-                    const done  = m.status === 'complete' || m.status === 'approved'
-                    const overdue = isOverdue(m.due_date, m.completed_date)
-                    const color = done ? '#16a34a' : overdue ? '#f59e0b' : m.status === 'blocked' ? '#ef4444' : '#6366f1'
-                    return (
-                      <div key={m.id} className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-default"
-                        style={{ left: `${mp}%` }}
-                        title={`${m.name} — Due ${fmtDateShort(m.due_date)}${done ? ' ✓' : overdue ? ' (overdue)' : ''}`}>
-                        <div className="h-3.5 w-3.5 rotate-45 rounded-sm ring-2 ring-white" style={{ backgroundColor: color }} />
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
 
+          {/* ── Today label footer ───────────────────────────────────── */}
           {showToday && (
             <div className="flex border-t border-gray-100 bg-gray-50">
               <div className="shrink-0 border-r border-gray-100" style={{ width: LEFT_COL_W }} />
-              <div className="relative flex-1 py-1.5">
-                <div className="absolute flex items-center gap-0.5" style={{ left: `${todayPct}%`, transform: 'translateX(-50%)' }}>
+              <div className="relative py-1.5" style={{ width: CHART_W }}>
+                <div className="absolute flex items-center gap-0.5" style={{ left: todayPx, transform: 'translateX(-50%)' }}>
                   <span className="rounded bg-red-400 px-1.5 py-0.5 text-[9px] font-semibold text-white">Today</span>
                 </div>
               </div>
             </div>
           )}
 
+          {/* ── Legend ───────────────────────────────────────────────── */}
           <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
             <div className="flex items-center gap-1.5">
               <div className="h-3 w-6 rounded-sm bg-gray-400 opacity-80" />
@@ -893,6 +916,7 @@ function GanttView({ phases }: { phases: ProjectPhase[] }) {
               </div>
             )}
           </div>
+
         </div>
       </div>
     </div>
