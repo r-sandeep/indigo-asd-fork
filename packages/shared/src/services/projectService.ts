@@ -371,7 +371,14 @@ export interface InvoiceTriggerMilestone {
   sequence:             number
   /** PM-configured billing amount in cents; null = not yet set */
   invoice_amount_cents: number | null
-  /** Derived from linked invoice header, if any */
+  /**
+   * Indigo-managed FK to the BB invoice raised for this milestone.
+   * Set by PM via the "Link Invoice" picker after BB creates the invoice.
+   * NULL = not yet linked.
+   * (milestones.linked_invoice_id — migration 021)
+   */
+  linked_invoice_id:    string | null
+  /** Flattened from joined invoice row */
   invoice_id:           string | null
   invoice_number:       string | null
   invoice_status:       string | null
@@ -386,8 +393,13 @@ export function getInvoiceTriggerState(m: InvoiceTriggerMilestone): InvoiceTrigg
 
 /**
  * Returns all milestones with triggers_invoice = true for a project,
- * each decorated with the invoice header that references it (if any).
- * Uses the invoices.milestone_id FK to detect invoiced state.
+ * each decorated with the linked invoice header (if any).
+ *
+ * Uses milestones.linked_invoice_id (forward FK, Indigo-managed) rather
+ * than the original invoices.milestone_id backref. BB never writes
+ * invoices.milestone_id, so the backref was always empty — milestones
+ * stayed stuck in 'ready' even after BB invoiced them.
+ * PMs set linked_invoice_id via the "Link Invoice" picker in FinancialsTab.
  */
 export async function getInvoiceTriggerMilestones(
   client: SupabaseClient,
@@ -398,7 +410,8 @@ export async function getInvoiceTriggerMilestones(
     .select(`
       id, project_id, phase_id, name, status,
       due_date, completed_date, sequence, invoice_amount_cents,
-      invoices!milestone_id ( id, invoice_number, invoice_status )
+      linked_invoice_id,
+      linked_invoice:invoices!linked_invoice_id ( id, invoice_number, invoice_status )
     `)
     .eq('project_id', projectId)
     .eq('triggers_invoice', true)
@@ -412,11 +425,12 @@ export async function getInvoiceTriggerMilestones(
     name: string; status: string; due_date: string | null
     completed_date: string | null; sequence: number
     invoice_amount_cents: number | null
-    invoices: Array<{ id: string; invoice_number: string; invoice_status: string }> | null
+    linked_invoice_id: string | null
+    linked_invoice: { id: string; invoice_number: string; invoice_status: string } | null
   }
 
   return ((data ?? []) as unknown as Raw[]).map((row) => {
-    const inv = row.invoices?.[0] ?? null
+    const inv = row.linked_invoice ?? null
     return {
       id:                   row.id,
       project_id:           row.project_id,
@@ -427,11 +441,31 @@ export async function getInvoiceTriggerMilestones(
       completed_date:       row.completed_date,
       sequence:             row.sequence,
       invoice_amount_cents: row.invoice_amount_cents,
-      invoice_id:           inv?.id           ?? null,
+      linked_invoice_id:    row.linked_invoice_id,
+      invoice_id:           inv?.id            ?? null,
       invoice_number:       inv?.invoice_number ?? null,
       invoice_status:       inv?.invoice_status ?? null,
     }
   })
+}
+
+/**
+ * Links (or unlinks) a BB invoice to an invoice-trigger milestone.
+ * Pass null to clear the link.
+ * This is the write side of the migration 021 fix.
+ */
+export async function linkMilestoneInvoice(
+  client: SupabaseClient,
+  milestoneId: string,
+  tenantId: string,
+  invoiceId: string | null,
+): Promise<void> {
+  const { error } = await client
+    .from('milestones')
+    .update({ linked_invoice_id: invoiceId } as unknown as never)
+    .eq('id', milestoneId)
+    .eq('tenant_id', tenantId)
+  if (error) throw error
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   createDrawSchedule,
   createDrawRequest,
   updateMilestoneInvoiceAmount,
+  linkMilestoneInvoice,
   getInvoiceTriggerState,
 } from '@indigo/shared'
 import {
@@ -1097,17 +1098,162 @@ function AmountCell({
   )
 }
 
+// ── Link Invoice Modal ─────────────────────────────────────────────────────
+// Lets PM select which BB invoice corresponds to a ready milestone.
+
+function LinkInvoiceModal({
+  milestone,
+  tenantId,
+  invoices,
+  onClose,
+  onLinked,
+}: {
+  milestone: InvoiceTriggerMilestone
+  tenantId:  string
+  invoices:  ProjectInvoice[]
+  onClose:   () => void
+  onLinked:  () => void
+}) {
+  const toast    = useToast()
+  const [selected, setSelected] = useState<string>('')
+
+  const mutation = useMutation({
+    mutationFn: () => linkMilestoneInvoice(supabase, milestone.id, tenantId, selected || null),
+    onSuccess: () => {
+      toast.success('Invoice linked.')
+      onLinked()
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Failed to link invoice', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  // Unlink (clear) mutation
+  const unlinkMut = useMutation({
+    mutationFn: () => linkMilestoneInvoice(supabase, milestone.id, tenantId, null),
+    onSuccess: () => {
+      toast.success('Invoice unlinked.')
+      onLinked()
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Failed to unlink', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  const isLinked = !!milestone.linked_invoice_id
+
+  return (
+    <ModalShell
+      title={isLinked ? 'Change Invoice Link' : 'Link Invoice'}
+      subtitle={milestone.name}
+      onClose={onClose}
+    >
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <p className="text-sm text-gray-500">
+            Select the BB invoice that was raised for this milestone.
+            Indigo uses this link to mark the milestone as <strong>Invoiced</strong>.
+          </p>
+
+          {invoices.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-gray-200 py-8 text-center">
+              <p className="text-sm text-gray-400">No invoices found for this job yet.</p>
+              <p className="mt-1 text-xs text-gray-400">Create the invoice in BB first, then come back here.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {invoices.map((inv) => {
+                const invStatusCfg = INVOICE_STATUS[inv.invoice_status ?? '']
+                const isChecked = selected === inv.id
+                return (
+                  <label
+                    key={inv.id}
+                    className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                      isChecked
+                        ? 'border-brand-400 bg-brand-50 ring-1 ring-brand-200'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="invoice"
+                      value={inv.id}
+                      checked={isChecked}
+                      onChange={() => setSelected(inv.id)}
+                      className="accent-brand-600"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-900">{inv.invoice_number}</span>
+                        {invStatusCfg && (
+                          <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${invStatusCfg.bg} ${invStatusCfg.color}`}>
+                            {invStatusCfg.label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {fmtDate(inv.invoice_date)} · {formatMoney(inv.total_cents)}
+                        {inv.balance_due_cents > 0 && ` · ${formatMoney(inv.balance_due_cents)} balance`}
+                      </p>
+                    </div>
+                    {isChecked && <CheckIcon className="h-4 w-4 text-brand-600 shrink-0" strokeWidth={2.5} />}
+                  </label>
+                )
+              })}
+            </div>
+          )}
+
+          {isLinked && (
+            <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-500">
+              Currently linked to: <strong>{milestone.invoice_number}</strong>
+              <button
+                type="button"
+                onClick={() => unlinkMut.mutate()}
+                disabled={unlinkMut.isPending}
+                className="ml-3 text-red-500 hover:text-red-600 font-medium disabled:opacity-50"
+              >
+                {unlinkMut.isPending ? 'Removing…' : 'Remove link'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-5 py-3">
+          <button type="button" onClick={onClose} disabled={mutation.isPending}
+            className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => mutation.mutate()}
+            disabled={!selected || mutation.isPending}
+            className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
+          >
+            {mutation.isPending ? 'Linking…' : 'Link Invoice'}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
 function InvoiceMilestonesSection({
   milestones,
+  invoices,
   tenantId,
   canEdit,
   onRefresh,
 }: {
   milestones: InvoiceTriggerMilestone[]
+  invoices:   ProjectInvoice[]
   tenantId:   string
   canEdit:    boolean
   onRefresh:  () => void
 }) {
+  const [linkingMilestone, setLinkingMilestone] = useState<InvoiceTriggerMilestone | null>(null)
+
   const totalConfigured = milestones.reduce((s, m) => s + (m.invoice_amount_cents ?? 0), 0)
   const readyMilestones = milestones.filter((m) => getInvoiceTriggerState(m) === 'ready')
   const readyAmount     = readyMilestones.reduce((s, m) => s + (m.invoice_amount_cents ?? 0), 0)
@@ -1186,9 +1332,9 @@ function InvoiceMilestonesSection({
 
           <div className="divide-y divide-gray-100">
             {milestones.map((m) => {
-              const state   = getInvoiceTriggerState(m)
+              const state    = getInvoiceTriggerState(m)
               const stateCfg = TRIGGER_STATE_CFG[state]
-              const isReady = state === 'ready'
+              const isReady  = state === 'ready'
 
               return (
                 <div
@@ -1245,8 +1391,26 @@ function InvoiceMilestonesSection({
                         } ${INVOICE_STATUS[m.invoice_status ?? '']?.color ?? 'text-gray-500'}`}>
                           {INVOICE_STATUS[m.invoice_status ?? '']?.label ?? m.invoice_status}
                         </span>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setLinkingMilestone(m)}
+                            className="ml-1 rounded p-0.5 text-gray-300 hover:text-brand-500 transition-colors"
+                            title="Change linked invoice"
+                          >
+                            <PencilIcon className="h-3 w-3" strokeWidth={2} />
+                          </button>
+                        )}
                       </div>
-                    ) : state === 'ready' ? (
+                    ) : isReady && canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => setLinkingMilestone(m)}
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                      >
+                        Link Invoice
+                      </button>
+                    ) : isReady ? (
                       <span className="text-xs font-medium text-amber-600">Awaiting invoice</span>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
@@ -1260,11 +1424,22 @@ function InvoiceMilestonesSection({
           {canEdit && (
             <div className="border-t border-gray-100 bg-gray-50 px-5 py-2.5">
               <p className="text-xs text-gray-400">
-                Click the amount to edit. Amounts are locked once a milestone is invoiced.
+                Click an amount to edit. Use <strong>Link Invoice</strong> on ready milestones to mark them as invoiced once BB raises the invoice.
               </p>
             </div>
           )}
         </>
+      )}
+
+      {/* Link invoice modal */}
+      {linkingMilestone && (
+        <LinkInvoiceModal
+          milestone={linkingMilestone}
+          tenantId={tenantId}
+          invoices={invoices}
+          onClose={() => setLinkingMilestone(null)}
+          onLinked={onRefresh}
+        />
       )}
     </div>
   )
@@ -1478,6 +1653,7 @@ export function FinancialsTab() {
 
       <InvoiceMilestonesSection
         milestones={invoiceMilestones ?? []}
+        invoices={invs}
         tenantId={tenantId}
         canEdit={canEditInvoiceAmounts}
         onRefresh={refreshInvoiceMilestones}
