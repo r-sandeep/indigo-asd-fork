@@ -51,17 +51,19 @@ const ROLE_LABEL: Record<string, string> = {
   owner:           'Owner',
   admin:           'Admin',
   project_manager: 'Project Manager',
-  field_super:     'Field Super',
+  field_super:     'Field Supervisor',
+  field_associate: 'Field Associate',
   accountant:      'Accountant',
   subcontractor:   'Subcontractor',
   client:          'Client',
 }
 
 const ROLE_COLOR: Record<string, string> = {
-  owner:           'bg-purple-50 text-purple-700',
-  admin:           'bg-indigo-50 text-indigo-700',
-  project_manager: 'bg-brand-50 text-brand-700',
-  field_super:     'bg-blue-50 text-blue-700',
+  owner:           'bg-purple-50  text-purple-700',
+  admin:           'bg-indigo-50  text-indigo-700',
+  project_manager: 'bg-brand-50   text-brand-700',
+  field_super:     'bg-blue-50    text-blue-700',
+  field_associate: 'bg-sky-50     text-sky-700',
   accountant:      'bg-emerald-50 text-emerald-700',
 }
 
@@ -582,7 +584,8 @@ export function EmployeesPage() {
           <option value="owner">Owner</option>
           <option value="admin">Admin</option>
           <option value="project_manager">Project Manager</option>
-          <option value="field_super">Field Super</option>
+          <option value="field_super">Field Supervisor</option>
+          <option value="field_associate">Field Associate</option>
           <option value="accountant">Accountant</option>
         </select>
         {(search || roleFilter !== 'all') && (

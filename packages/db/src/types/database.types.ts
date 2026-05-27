@@ -37,7 +37,7 @@ export type LienWaiverType =
   | 'conditional_final' | 'unconditional_final'
 export type MemberRole =
   | 'owner' | 'admin' | 'project_manager' | 'field_super'
-  | 'accountant' | 'subcontractor' | 'client'
+  | 'accountant' | 'subcontractor' | 'field_associate' | 'client'
 export type PhaseStatus = 'not_started' | 'in_progress' | 'complete' | 'approved' | 'blocked'
 export type PoStatus = 'draft' | 'sent' | 'acknowledged' | 'partially_received' | 'complete' | 'void'
 export type PunchPriority = 'low' | 'normal' | 'high' | 'blocking'

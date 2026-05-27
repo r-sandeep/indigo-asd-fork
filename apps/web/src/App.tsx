@@ -19,6 +19,7 @@ import { SubsTab } from '@/features/projects/tabs/SubsTab'
 import { ClientTab } from '@/features/projects/tabs/ClientTab'
 import { ClockTab } from '@/features/projects/tabs/ClockTab'
 import { EmployeesPage } from '@/features/employees/EmployeesPage'
+import { SettingsPage } from '@/features/settings/SettingsPage'
 import { PortalLoginPage } from '@/features/portal/PortalLoginPage'
 import { PortalShell } from '@/features/portal/PortalShell'
 import { PortalProjectsPage } from '@/features/portal/PortalProjectsPage'
@@ -64,6 +65,7 @@ function AuthRoutes() {
         </Route>
 
         <Route path="employees"        element={<EmployeesPage />} />
+        <Route path="settings"         element={<SettingsPage />} />
         <Route path="schedule"        element={<ComingSoon name="Schedule" />} />
         <Route path="financials/*"    element={<ComingSoon name="Financials" />} />
         <Route path="documents"       element={<ComingSoon name="Documents" />} />

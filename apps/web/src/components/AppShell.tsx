@@ -11,6 +11,7 @@ import {
   SparklesIcon,
   BellIcon,
   Bars3Icon,
+  GearIcon,
 } from '@/components/ui/Icons'
 
 interface NavItem {
@@ -30,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/subcontractors', label: 'Subcontractors',  Icon: UsersIcon },
   { to: '/employees',      label: 'Employees',        Icon: UsersIcon },
   { to: '/ai',             label: 'AI Assistant',    Icon: SparklesIcon },
+  { to: '/settings',       label: 'Settings',         Icon: GearIcon },
 ]
 
 function SidebarNavItem({ item }: { item: NavItem }) {
