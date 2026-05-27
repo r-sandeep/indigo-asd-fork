@@ -1,9 +1,11 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
   type KeyboardEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,12 @@ interface PhotonFeature {
     country?:     string
     type?:        string
   }
+}
+
+interface DropdownRect {
+  top:   number
+  left:  number
+  width: number
 }
 
 interface Props {
@@ -59,6 +67,9 @@ const STATE_ABBR: Record<string, string> = {
 
 // ── Photon helpers ─────────────────────────────────────────────────────────
 
+// Bounding box roughly covering the continental US + HI + AK
+const US_BBOX = '-179,18,-66,72'
+
 /** Human-readable label shown in the dropdown for a Photon result. */
 function featureLabel(f: PhotonFeature): string {
   const p = f.properties
@@ -74,7 +85,7 @@ function featureLabel(f: PhotonFeature): string {
 
 /** Converts a selected Photon feature into the structured AddressResult. */
 function featureToResult(f: PhotonFeature): AddressResult {
-  const p   = f.properties
+  const p = f.properties
   const [lng, lat] = f.geometry.coordinates
 
   const line1 =
@@ -112,8 +123,9 @@ function useDebounce<T>(value: T, delay: number): T {
  * Address autocomplete input backed by Photon (photon.komoot.io).
  * Free, open-source, no API key required.
  *
- * Shows a custom dropdown as the user types. On selection, `onSelect` fires
- * with structured address components (line1, city, state, zip) and lat/lng.
+ * The dropdown is rendered via a React portal at document.body with
+ * position:fixed so it escapes any overflow:hidden/auto ancestors (e.g.
+ * scrollable modals).
  */
 export function AddressAutocomplete({
   value,
@@ -123,16 +135,39 @@ export function AddressAutocomplete({
   className,
   disabled,
 }: Props) {
-  const [suggestions,  setSuggestions]  = useState<PhotonFeature[]>([])
-  const [open,         setOpen]         = useState(false)
-  const [loading,      setLoading]      = useState(false)
-  const [activeIndex,  setActiveIndex]  = useState(-1)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef           = useRef<HTMLInputElement>(null)
   const ignoreNextFetchRef = useRef(false)
+
+  const [suggestions, setSuggestions] = useState<PhotonFeature[]>([])
+  const [open,        setOpen]        = useState(false)
+  const [loading,     setLoading]     = useState(false)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const [rect,        setRect]        = useState<DropdownRect>({ top: 0, left: 0, width: 0 })
 
   const debouncedQuery = useDebounce(value, 300)
 
-  // Fetch suggestions whenever the debounced query changes
+  // ── Measure input position for portal dropdown ────────────────────────────
+
+  const measureInput = useCallback(() => {
+    if (!inputRef.current) return
+    const r = inputRef.current.getBoundingClientRect()
+    setRect({ top: r.bottom + 4, left: r.left, width: r.width })
+  }, [])
+
+  // Re-measure whenever the dropdown is open (catches scroll / resize)
+  useEffect(() => {
+    if (!open) return
+    measureInput()
+    window.addEventListener('scroll',  measureInput, true)
+    window.addEventListener('resize',  measureInput)
+    return () => {
+      window.removeEventListener('scroll', measureInput, true)
+      window.removeEventListener('resize', measureInput)
+    }
+  }, [open, measureInput])
+
+  // ── Fetch suggestions ─────────────────────────────────────────────────────
+
   useEffect(() => {
     if (ignoreNextFetchRef.current) {
       ignoreNextFetchRef.current = false
@@ -150,14 +185,13 @@ export function AddressAutocomplete({
     setLoading(true)
 
     fetch(
-      `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=en`,
+      `https://photon.komoot.io/api/` +
+      `?q=${encodeURIComponent(q)}&limit=6&lang=en&bbox=${US_BBOX}`,
     )
       .then((r) => r.json())
       .then((data: { features?: PhotonFeature[] }) => {
         if (cancelled) return
-        const features = (data.features ?? []).filter(
-          (f) => f.properties.country === 'United States of America',
-        )
+        const features = data.features ?? []
         setSuggestions(features)
         setOpen(features.length > 0)
         setActiveIndex(-1)
@@ -168,10 +202,12 @@ export function AddressAutocomplete({
     return () => { cancelled = true }
   }, [debouncedQuery])
 
-  // Close dropdown on outside click
+  // ── Close on outside click ────────────────────────────────────────────────
+
   useEffect(() => {
     function onPointerDown(e: PointerEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      // Close unless the click was on the input itself
+      if (inputRef.current && !inputRef.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
@@ -179,10 +215,11 @@ export function AddressAutocomplete({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [])
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
   function handleSelect(feature: PhotonFeature) {
     const result = featureToResult(feature)
-    // Suppress the next fetch that would fire because onChange updates the input value
-    ignoreNextFetchRef.current = true
+    ignoreNextFetchRef.current = true // suppress the fetch triggered by onChange
     onChange(result.line1)
     onSelect(result)
     setSuggestions([])
@@ -207,59 +244,81 @@ export function AddressAutocomplete({
     }
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const dropdown =
+    open && suggestions.length > 0
+      ? createPortal(
+          <ul
+            role="listbox"
+            style={{
+              position: 'fixed',
+              top:      rect.top,
+              left:     rect.left,
+              width:    rect.width,
+              zIndex:   9999,
+            }}
+            className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl"
+          >
+            {suggestions.map((f, i) => (
+              <li
+                key={i}
+                role="option"
+                aria-selected={i === activeIndex}
+                onPointerDown={(e) => {
+                  e.preventDefault() // keep input focused until selection is committed
+                  handleSelect(f)
+                }}
+                className={`cursor-pointer px-3 py-2.5 text-sm transition-colors ${
+                  i === activeIndex
+                    ? 'bg-brand-50 text-brand-800'
+                    : 'text-gray-800 hover:bg-gray-50'
+                }`}
+              >
+                {featureLabel(f)}
+              </li>
+            ))}
+          </ul>,
+          document.body,
+        )
+      : null
+
   return (
-    <div ref={containerRef} className="relative">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onFocus={() => { if (suggestions.length > 0) setOpen(true) }}
-        placeholder={placeholder ?? 'Start typing to search address…'}
-        disabled={disabled}
-        className={className}
-        autoComplete="off"
-        aria-autocomplete="list"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      />
+    <>
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={() => {
+            if (suggestions.length > 0) {
+              measureInput()
+              setOpen(true)
+            }
+          }}
+          placeholder={placeholder ?? 'Start typing to search address…'}
+          disabled={disabled}
+          className={className}
+          autoComplete="off"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-haspopup="listbox"
+        />
 
-      {/* Loading spinner */}
-      {loading && (
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
-          <svg className="h-4 w-4 animate-spin text-gray-400" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-          </svg>
-        </span>
-      )}
+        {/* Spinner — inside the input wrapper so it's never clipped */}
+        {loading && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+            <svg className="h-4 w-4 animate-spin text-gray-400" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          </span>
+        )}
+      </div>
 
-      {/* Dropdown */}
-      {open && suggestions.length > 0 && (
-        <ul
-          role="listbox"
-          className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
-        >
-          {suggestions.map((f, i) => (
-            <li
-              key={i}
-              role="option"
-              aria-selected={i === activeIndex}
-              onPointerDown={(e) => {
-                e.preventDefault() // prevent input blur before click fires
-                handleSelect(f)
-              }}
-              className={`cursor-pointer px-3 py-2.5 text-sm transition-colors ${
-                i === activeIndex
-                  ? 'bg-brand-50 text-brand-800'
-                  : 'text-gray-800 hover:bg-gray-50'
-              }`}
-            >
-              {featureLabel(f)}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+      {dropdown}
+    </>
   )
 }
