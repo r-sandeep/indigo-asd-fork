@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { hereSearch } from '@/lib/hereApi'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -15,8 +16,8 @@ export interface AddressResult {
   county: string   // retained — county is useful context for job sites
   state:  string   // 2-letter code
   zip:    string
-  lat:    number
-  lng:    number
+  lat:    number | null  // null if geocode step fails
+  lng:    number | null  // null if geocode step fails
   // country is intentionally omitted — always USA for this app
 }
 
@@ -67,10 +68,11 @@ function itemLabel(item: HereItem): { main: string; sub: string } {
   return { main, sub }
 }
 
-/** Converts a selected HERE item into an AddressResult (drops country). */
-function itemToResult(item: HereItem): AddressResult | null {
-  const pos = item.position
-  if (!pos) return null   // position is required for geofencing
+/**
+ * Converts a selected HERE autocomplete item into a partial AddressResult.
+ * lat/lng are null here — they get filled in by a separate geocode call in handleSelect.
+ */
+function itemToResult(item: HereItem): AddressResult {
   const a = item.address
   return {
     line1:  a.houseNumber && a.street
@@ -80,8 +82,8 @@ function itemToResult(item: HereItem): AddressResult | null {
     county: a.county ?? '',
     state:  a.stateCode ?? a.state ?? '',
     zip:    a.postalCode ?? '',
-    lat:    pos.lat,
-    lng:    pos.lng,
+    lat:    item.position?.lat ?? null,
+    lng:    item.position?.lng ?? null,
   }
 }
 
@@ -122,6 +124,7 @@ export function AddressAutocomplete({
   const [items,       setItems]       = useState<HereItem[]>([])
   const [open,        setOpen]        = useState(false)
   const [loading,     setLoading]     = useState(false)
+  const [apiError,    setApiError]    = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
   const [rect,        setRect]        = useState<DropdownRect>({ top: 0, left: 0, width: 0 })
 
@@ -161,25 +164,32 @@ export function AddressAutocomplete({
       return
     }
 
-    const key = import.meta.env.VITE_HERE_API_KEY as string | undefined
-    if (!key) return  // no key → silent no-op (works as plain input)
-
     let cancelled = false
     setLoading(true)
+    setApiError(null)
 
-    fetch(
-      `https://discover.search.hereapi.com/v1/discover` +
-      `?q=${encodeURIComponent(q)}&in=countryCode:USA&limit=6&apiKey=${key}`,
-    )
-      .then((r) => r.json())
-      .then((data: { items?: HereItem[] }) => {
+    hereSearch(q, 'autocomplete')
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text().catch(() => '')
+          throw new Error(`HERE API ${r.status}: ${body.slice(0, 120)}`)
+        }
+        return r.json() as Promise<{ items?: HereItem[] }>
+      })
+      .then((data) => {
         if (cancelled) return
-        const results = (data.items ?? []).filter((i) => !!i.position)
+        // autocomplete endpoint returns no position — keep all items and geocode on select
+        const results = data.items ?? []
         setItems(results)
         setOpen(results.length > 0)
         setActiveIndex(-1)
       })
-      .catch(() => { /* network errors → plain input, no crash */ })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          console.error('[AddressAutocomplete]', err.message)
+          setApiError(err.message)
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
@@ -200,15 +210,29 @@ export function AddressAutocomplete({
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   function handleSelect(item: HereItem) {
-    const result = itemToResult(item)
-    if (!result) return
     const { main } = itemLabel(item)
     ignoreNextFetchRef.current = true
     onChange(main)
-    onSelect(result)
     setItems([])
     setOpen(false)
     setActiveIndex(-1)
+
+    // Build partial result from autocomplete address fields (no lat/lng yet)
+    const partial = itemToResult(item)
+
+    // Geocode separately to get lat/lng, then call onSelect with full result
+    const fullAddress = [partial.line1, partial.city, partial.state, partial.zip]
+      .filter(Boolean).join(', ')
+    hereSearch(fullAddress, 'geocode')
+      .then(async (r) => {
+        if (!r.ok) return null
+        const data = await r.json() as { items?: Array<{ position?: { lat: number; lng: number } }> }
+        return data.items?.[0]?.position ?? null
+      })
+      .catch(() => null)
+      .then((pos) => {
+        onSelect({ ...partial, lat: pos?.lat ?? null, lng: pos?.lng ?? null })
+      })
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -303,6 +327,15 @@ export function AddressAutocomplete({
           </span>
         )}
       </div>
+
+      {apiError && (
+        <p className="mt-1 text-xs text-red-600">
+          Address lookup failed — {apiError.startsWith('HERE API 401')
+            ? 'API key not authorised for this domain. See setup instructions.'
+            : apiError}
+        </p>
+      )}
+
       {dropdown}
     </>
   )

@@ -1,32 +1,25 @@
+import { hereSearch } from './hereApi'
+
 /**
- * Geocodes an address string using the HERE Geocoding API.
- * Requires VITE_HERE_API_KEY to be set.
- *
+ * Geocodes an address string via HERE (proxied through the Netlify function).
  * Returns { lat, lng } on success, or null if geocoding fails.
  */
 export async function geocodeAddress(
   address: string,
 ): Promise<{ lat: number; lng: number } | null> {
-  const key = import.meta.env.VITE_HERE_API_KEY as string | undefined
-  if (!key || !address.trim()) return null
-
-  const url =
-    `https://geocode.search.hereapi.com/v1/geocode` +
-    `?q=${encodeURIComponent(address)}&in=countryCode:USA&apiKey=${key}`
+  if (!address.trim()) return null
 
   type HereResponse = {
-    items: Array<{ position?: { lat: number; lng: number } }>
+    items?: Array<{ position?: { lat: number; lng: number } }>
   }
 
-  let data: HereResponse
   try {
-    const res = await fetch(url)
+    const res = await hereSearch(address, 'geocode')
     if (!res.ok) return null
-    data = (await res.json()) as HereResponse
+    const data = (await res.json()) as HereResponse
+    const pos  = data.items?.[0]?.position
+    return pos ? { lat: pos.lat, lng: pos.lng } : null
   } catch {
     return null
   }
-
-  const pos = data.items?.[0]?.position
-  return pos ? { lat: pos.lat, lng: pos.lng } : null
 }
