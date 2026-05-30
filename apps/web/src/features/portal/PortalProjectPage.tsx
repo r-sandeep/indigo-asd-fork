@@ -99,7 +99,10 @@ function IconFinances() {
   return (
     <svg {...IPROPS}>
       <circle cx="10" cy="10" r="7.5"/>
-      <path d="M10 6.5V7m0 6v.5M7.75 8.5A2.25 2.25 0 0110 7a2.25 2.25 0 012.25 2.25c0 1.24-1 2.25-2.25 2.25A2.25 2.25 0 007.75 13.75"/>
+      {/* Vertical bar — extends slightly above and below the S-curve */}
+      <path d="M10 5v10"/>
+      {/* Dollar sign S-curve */}
+      <path d="M13 7.5C13 6 11.66 5.25 10 5.25C8.34 5.25 7 6.25 7 7.75C7 9.25 8.34 9.75 10 10.25C11.66 10.75 13 11.5 13 12.75C13 14 11.66 14.75 10 14.75C8.34 14.75 7 14 7 12.75"/>
     </svg>
   )
 }
