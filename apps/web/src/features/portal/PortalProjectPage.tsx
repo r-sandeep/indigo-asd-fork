@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getPortalProjectData,
@@ -21,6 +21,10 @@ import type {
 import { supabase } from '@/lib/supabase'
 import { usePortalAuth } from '@/hooks/usePortalAuth'
 import { Skeleton } from '@/components/ui/Skeleton'
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+type TabId = 'overview' | 'timeline' | 'finances' | 'updates' | 'documents' | 'selections'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -52,6 +56,126 @@ function daysUntil(s: string | null | undefined): string {
   return `${diff} days away`
 }
 
+// ── Icons ──────────────────────────────────────────────────────────────────
+// Clean 20×20 stroke icons — no emoji, consistent weight
+
+const IPROPS = {
+  viewBox: '0 0 20 20',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: '1.5',
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  className: 'w-[18px] h-[18px] shrink-0',
+}
+
+function IconOverview() {
+  return (
+    <svg {...IPROPS}>
+      <rect x="2.75" y="2.75" width="5.5" height="5.5" rx="1"/>
+      <rect x="11.75" y="2.75" width="5.5" height="5.5" rx="1"/>
+      <rect x="2.75" y="11.75" width="5.5" height="5.5" rx="1"/>
+      <rect x="11.75" y="11.75" width="5.5" height="5.5" rx="1"/>
+    </svg>
+  )
+}
+
+function IconTimeline() {
+  return (
+    <svg {...IPROPS}>
+      <circle cx="5" cy="5.5" r="1.5" fill="currentColor" stroke="none"/>
+      <circle cx="5" cy="10" r="1.5" fill="currentColor" stroke="none"/>
+      <circle cx="5" cy="14.5" r="1.5" fill="currentColor" stroke="none"/>
+      <line x1="5" y1="7" x2="5" y2="8.5"/>
+      <line x1="5" y1="11.5" x2="5" y2="13"/>
+      <line x1="8.5" y1="5.5" x2="17" y2="5.5"/>
+      <line x1="8.5" y1="10" x2="17" y2="10"/>
+      <line x1="8.5" y1="14.5" x2="14" y2="14.5"/>
+    </svg>
+  )
+}
+
+function IconFinances() {
+  return (
+    <svg {...IPROPS}>
+      <circle cx="10" cy="10" r="7.5"/>
+      <path d="M10 6.5V7m0 6v.5M7.75 8.5A2.25 2.25 0 0110 7a2.25 2.25 0 012.25 2.25c0 1.24-1 2.25-2.25 2.25A2.25 2.25 0 007.75 13.75"/>
+    </svg>
+  )
+}
+
+function IconUpdates() {
+  return (
+    <svg {...IPROPS}>
+      <rect x="3.5" y="4" width="13" height="13" rx="1.5"/>
+      <line x1="7" y1="8.5" x2="13" y2="8.5"/>
+      <line x1="7" y1="11" x2="13" y2="11"/>
+      <line x1="7" y1="13.5" x2="10.5" y2="13.5"/>
+    </svg>
+  )
+}
+
+function IconDocuments() {
+  return (
+    <svg {...IPROPS}>
+      <path d="M5.5 2.5h6l4 4v11a1 1 0 01-1 1h-9a1 1 0 01-1-1v-14a1 1 0 011-1z"/>
+      <polyline points="11.5,2.5 11.5,6.5 15.5,6.5"/>
+    </svg>
+  )
+}
+
+function IconSelections() {
+  // Three vertical swatches
+  return (
+    <svg {...IPROPS}>
+      <rect x="2.5" y="5" width="4" height="12" rx="1"/>
+      <rect x="8" y="3" width="4" height="14" rx="1"/>
+      <rect x="13.5" y="5" width="4" height="12" rx="1"/>
+    </svg>
+  )
+}
+
+// ── Tab bar ────────────────────────────────────────────────────────────────
+
+interface TabDef {
+  id:     TabId
+  label:  string
+  icon:   React.ReactNode
+  badge?: number
+}
+
+function TabBar({ tabs, active, onChange }: {
+  tabs:     TabDef[]
+  active:   TabId
+  onChange: (id: TabId) => void
+}) {
+  return (
+    <div className="sticky top-14 z-10 -mx-4 mb-5 border-b border-gray-200 bg-white px-4">
+      <nav className="flex overflow-x-auto">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => onChange(tab.id)}
+            className={`relative flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
+              active === tab.id
+                ? 'border-brand-600 text-brand-600'
+                : 'border-transparent text-gray-400 hover:border-gray-300 hover:text-gray-600'
+            }`}
+          >
+            {tab.icon}
+            <span className="hidden sm:block">{tab.label}</span>
+            {tab.badge != null && tab.badge > 0 && (
+              <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                {tab.badge > 9 ? '9+' : tab.badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
+    </div>
+  )
+}
+
 // ── Progress card ──────────────────────────────────────────────────────────
 
 function ProgressCard({
@@ -60,18 +184,14 @@ function ProgressCard({
   targetCompletion,
   contractCents,
 }: {
-  milestones: PortalMilestone[]
-  startDate: string | null
+  milestones:       PortalMilestone[]
+  startDate:        string | null
   targetCompletion: string | null
-  contractCents: number | null
+  contractCents:    number | null
 }) {
   const done  = milestones.filter((m) => m.status === 'complete' || m.status === 'approved').length
   const total = milestones.length
   const pct   = total > 0 ? Math.round((done / total) * 100) : 0
-
-  const nextMilestone = milestones.find(
-    (m) => m.status !== 'complete' && m.status !== 'approved' && m.status !== 'void',
-  )
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -86,7 +206,9 @@ function ProgressCard({
         {contractCents != null && (
           <div className="text-right">
             <p className="text-sm font-medium text-gray-500">Contract Value</p>
-            <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900">{formatMoney(contractCents)}</p>
+            <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900">
+              {formatMoney(contractCents)}
+            </p>
           </div>
         )}
       </div>
@@ -115,19 +237,138 @@ function ProgressCard({
           )}
         </div>
       </div>
+    </div>
+  )
+}
 
-      {nextMilestone && (
-        <div className="mt-4 rounded-xl bg-brand-50 px-4 py-3 border-t border-gray-100">
-          <p className="text-xs font-semibold uppercase tracking-wider text-brand-500">Next Milestone</p>
-          <p className="mt-1 text-sm font-semibold text-brand-900">{nextMilestone.name}</p>
-          {nextMilestone.due_date && (
-            <p className="mt-0.5 text-xs text-brand-600">{fmtDateShort(nextMilestone.due_date)} · {daysUntil(nextMilestone.due_date)}</p>
-          )}
-          {nextMilestone.requires_client_approval && !nextMilestone.client_approved_at && (
-            <p className="mt-1 text-xs font-medium text-amber-700">⚠ Your approval is required for this milestone</p>
-          )}
+// ── Overview: pending actions ──────────────────────────────────────────────
+
+function OverviewActions({
+  milestones,
+  selections,
+  invoices,
+  onApprove,
+  approvingId,
+  onNavigate,
+  isStaffPreview,
+}: {
+  milestones:     PortalMilestone[]
+  selections:     PortalSelectionCategory[] | undefined
+  invoices:       PortalInvoice[]
+  onApprove:      (id: string) => void
+  approvingId:    string | null
+  onNavigate:     (tab: TabId) => void
+  isStaffPreview: boolean
+}) {
+  const needsApproval  = milestones.filter(
+    (m) => m.requires_client_approval && !m.client_approved_at
+        && m.status !== 'complete' && m.status !== 'approved',
+  )
+  const pendingSel     = (selections ?? []).filter(
+    (c) => ['pending', 'client_choosing'].includes(c.status) && !c.selection,
+  )
+  const outstanding    = invoices.filter((i) => i.balance_due_cents > 0)
+  const outstandingAmt = outstanding.reduce((s, i) => s + i.balance_due_cents, 0)
+  const hasActions     = needsApproval.length > 0 || pendingSel.length > 0 || outstanding.length > 0
+
+  if (!hasActions) {
+    return (
+      <div className="rounded-2xl border border-gray-200 bg-white px-5 py-8 shadow-sm text-center">
+        <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-green-50">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 text-green-600">
+            <path d="M4 10l4 4 8-8"/>
+          </svg>
         </div>
-      )}
+        <p className="text-sm font-semibold text-gray-900">All caught up</p>
+        <p className="mt-1 text-xs text-gray-500">No pending actions on this project</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div className="border-b border-gray-100 px-5 py-4">
+        <h2 className="text-base font-semibold text-gray-900">
+          {isStaffPreview ? 'Pending Actions' : 'Needs Attention'}
+        </h2>
+      </div>
+
+      <div className="divide-y divide-gray-100">
+        {needsApproval.map((m) => (
+          <div key={m.id} className="flex items-start gap-3 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600">
+                Milestone approval
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-gray-900">{m.name}</p>
+              {m.due_date && (
+                <p className="mt-0.5 text-xs text-gray-400">{fmtDateShort(m.due_date)}</p>
+              )}
+            </div>
+            {isStaffPreview ? (
+              <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                Awaiting client
+              </span>
+            ) : (
+              <button
+                onClick={() => onApprove(m.id)}
+                disabled={approvingId === m.id}
+                className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+              >
+                {approvingId === m.id ? 'Approving…' : 'Approve'}
+              </button>
+            )}
+          </div>
+        ))}
+
+        {pendingSel.length > 0 && (
+          <div className="flex items-start gap-3 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-600">
+                Selections needed
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-gray-900">
+                {pendingSel.length} {pendingSel.length === 1 ? 'category' : 'categories'}{' '}
+                {isStaffPreview ? 'awaiting client input' : 'need your input'}
+              </p>
+              <p className="mt-0.5 text-xs text-gray-400 truncate">
+                {pendingSel.slice(0, 2).map((s) => s.name).join(', ')}
+                {pendingSel.length > 2 ? ` +${pendingSel.length - 2} more` : ''}
+              </p>
+            </div>
+            {!isStaffPreview && (
+              <button
+                onClick={() => onNavigate('selections')}
+                className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition-colors hover:bg-brand-100"
+              >
+                View
+              </button>
+            )}
+          </div>
+        )}
+
+        {outstanding.length > 0 && (
+          <div className="flex items-start gap-3 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Outstanding balance
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-gray-900">
+                {formatMoney(outstandingAmt)}
+              </p>
+              <p className="mt-0.5 text-xs text-gray-400">
+                {outstanding.length} unpaid invoice{outstanding.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigate('finances')}
+              className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              View
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -163,29 +404,28 @@ function SelectionCategoryCard({
   onConfirm,
   isConfirming,
 }: {
-  category: PortalSelectionCategory
-  onConfirm: (optionId: string | null) => void
+  category:    PortalSelectionCategory
+  onConfirm:   (optionId: string | null) => void
   isConfirming: boolean
 }) {
-  const isLocked = ['approved', 'ordered', 'received', 'installed'].includes(category.status)
+  const isLocked     = ['approved', 'ordered', 'received', 'installed'].includes(category.status)
   const hasConfirmed = !!category.selection?.option_id || !!category.selection?.custom_description
 
   const [isOpen, setIsOpen] = useState(!hasConfirmed && !isLocked)
-  const [picked, setPicked]   = useState<string | null>(category.selection?.option_id ?? null)
+  const [picked, setPicked] = useState<string | null>(category.selection?.option_id ?? null)
 
-  const selectedOption = category.options.find((o) => o.id === picked)
+  const selectedOption  = category.options.find((o) => o.id === picked)
   const confirmedOption = category.options.find((o) => o.id === category.selection?.option_id)
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-      {/* Header */}
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div
         className={`flex items-start justify-between gap-3 p-4 ${!isLocked ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
         onClick={() => !isLocked && setIsOpen((v) => !v)}
       >
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold text-gray-900 text-sm">{category.name}</p>
+            <p className="text-sm font-semibold text-gray-900">{category.name}</p>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${SELECTION_STATUS_COLOR[category.status] ?? 'bg-gray-100 text-gray-500'}`}>
               {SELECTION_STATUS_LABEL[category.status] ?? category.status}
             </span>
@@ -195,26 +435,22 @@ function SelectionCategoryCard({
           )}
           <div className="mt-1 flex items-center gap-3 text-xs text-gray-400">
             <span>Allowance: <span className="font-medium text-gray-700">{formatMoney(category.allowance_cents)}</span></span>
-            {category.due_date && (
-              <span>Due {fmtDateShort(category.due_date)}</span>
-            )}
+            {category.due_date && <span>Due {fmtDateShort(category.due_date)}</span>}
           </div>
         </div>
-
         {!isLocked && (
-          <span className="shrink-0 text-gray-300 text-sm">{isOpen ? '▲' : '▼'}</span>
+          <span className="shrink-0 text-sm text-gray-300">{isOpen ? '▲' : '▼'}</span>
         )}
       </div>
 
-      {/* Confirmed selection (collapsed view) */}
       {!isOpen && hasConfirmed && (
         <div className="border-t border-gray-100 bg-green-50 px-4 py-3">
-          <p className="text-xs font-medium text-green-700 mb-0.5">Your selection</p>
+          <p className="mb-0.5 text-xs font-medium text-green-700">Your selection</p>
           <p className="text-sm font-semibold text-gray-900">
             {confirmedOption?.name ?? category.selection?.custom_description ?? '—'}
           </p>
           {confirmedOption && confirmedOption.unit_price_cents > category.allowance_cents && (
-            <p className="text-xs text-amber-600 mt-0.5">
+            <p className="mt-0.5 text-xs text-amber-600">
               +{formatMoney(overage(confirmedOption.unit_price_cents, category.allowance_cents))} over allowance
             </p>
           )}
@@ -229,7 +465,6 @@ function SelectionCategoryCard({
         </div>
       )}
 
-      {/* Options picker */}
       {isOpen && (
         <div className="border-t border-gray-100">
           {category.options.length === 0 ? (
@@ -237,25 +472,25 @@ function SelectionCategoryCard({
           ) : (
             <div className="divide-y divide-gray-50">
               {category.options.map((opt) => {
-                const over = overage(opt.unit_price_cents, category.allowance_cents)
+                const over     = overage(opt.unit_price_cents, category.allowance_cents)
                 const isPicked = picked === opt.id
                 return (
                   <button
                     key={opt.id}
                     onClick={() => setPicked(opt.id)}
-                    className={`w-full text-left px-4 py-3 transition-colors flex items-start gap-3 ${isPicked ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
+                    className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${isPicked ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
                   >
                     <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${isPicked ? 'border-brand-600 bg-brand-600' : 'border-gray-300'}`}>
-                      {isPicked && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                      {isPicked && <span className="h-1.5 w-1.5 rounded-full bg-white"/>}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className={`text-sm font-medium ${isPicked ? 'text-brand-900' : 'text-gray-900'}`}>{opt.name}</p>
-                      {opt.description && <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>}
+                      {opt.description && <p className="mt-0.5 text-xs text-gray-500">{opt.description}</p>}
                       <div className="mt-1 flex items-center gap-2 text-xs">
                         {over > 0 ? (
-                          <span className="text-amber-600 font-medium">+{formatMoney(over)} over allowance</span>
+                          <span className="font-medium text-amber-600">+{formatMoney(over)} over allowance</span>
                         ) : (
-                          <span className="text-green-600 font-medium">Within allowance</span>
+                          <span className="font-medium text-green-600">Within allowance</span>
                         )}
                         {opt.vendor && <span className="text-gray-400">· {opt.vendor}</span>}
                         {opt.lead_time_days && <span className="text-gray-400">· {opt.lead_time_days}d lead time</span>}
@@ -278,14 +513,15 @@ function SelectionCategoryCard({
             </div>
           )}
 
-          {/* Confirm button */}
           {category.options.length > 0 && (
-            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-3">
               {selectedOption && (
-                <p className="text-xs text-gray-500 flex-1">
+                <p className="flex-1 text-xs text-gray-500">
                   Selected: <span className="font-medium text-gray-700">{selectedOption.name}</span>
                   {overage(selectedOption.unit_price_cents, category.allowance_cents) > 0 && (
-                    <span className="text-amber-600"> (+{formatMoney(overage(selectedOption.unit_price_cents, category.allowance_cents))})</span>
+                    <span className="text-amber-600">
+                      {' '}(+{formatMoney(overage(selectedOption.unit_price_cents, category.allowance_cents))})
+                    </span>
                   )}
                 </p>
               )}
@@ -304,13 +540,13 @@ function SelectionCategoryCard({
   )
 }
 
-function SelectionsSection({
+function SelectionsTab({
   categories,
   project,
   customerId,
 }: {
   categories: PortalSelectionCategory[]
-  project: { id: string; tenant_id: string }
+  project:    { id: string; tenant_id: string }
   customerId: string
 }) {
   const queryClient = useQueryClient()
@@ -332,67 +568,51 @@ function SelectionsSection({
   const confirmed = categories.filter((c) => !!c.selection)
   const other     = categories.filter((c) => !c.selection && !['pending', 'client_choosing'].includes(c.status))
 
-  if (categories.length === 0) return null
+  if (categories.length === 0) {
+    return (
+      <div className="mt-12 text-center">
+        <p className="text-sm text-gray-400">No selections for this project yet.</p>
+      </div>
+    )
+  }
+
+  const pendingCount = pending.length
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-      <div className="border-b border-gray-100 px-5 py-4">
-        <h2 className="text-base font-semibold text-gray-900">Your Selections</h2>
-        <p className="mt-0.5 text-xs text-gray-500">
-          {pending.length > 0
-            ? `${pending.length} decision${pending.length !== 1 ? 's' : ''} waiting for your input`
-            : 'All selections made'}
+    <div className="space-y-3">
+      {pendingCount > 0 && (
+        <p className="text-xs font-medium text-gray-500">
+          {pendingCount} decision{pendingCount !== 1 ? 's' : ''} waiting for your input
         </p>
-      </div>
-
-      <div className="divide-y divide-gray-100 px-4 py-3 space-y-3">
-        {/* Pending first — action needed */}
-        {pending.map((cat) => (
-          <SelectionCategoryCard
-            key={cat.id}
-            category={cat}
-            onConfirm={(optId) => confirmMut.mutate({ categoryId: cat.id, optionId: optId })}
-            isConfirming={confirmMut.isPending && confirmMut.variables?.categoryId === cat.id}
-          />
-        ))}
-        {confirmed.map((cat) => (
-          <SelectionCategoryCard
-            key={cat.id}
-            category={cat}
-            onConfirm={(optId) => confirmMut.mutate({ categoryId: cat.id, optionId: optId })}
-            isConfirming={confirmMut.isPending && confirmMut.variables?.categoryId === cat.id}
-          />
-        ))}
-        {other.map((cat) => (
-          <SelectionCategoryCard
-            key={cat.id}
-            category={cat}
-            onConfirm={(optId) => confirmMut.mutate({ categoryId: cat.id, optionId: optId })}
-            isConfirming={confirmMut.isPending && confirmMut.variables?.categoryId === cat.id}
-          />
-        ))}
-      </div>
+      )}
+      {[...pending, ...confirmed, ...other].map((cat) => (
+        <SelectionCategoryCard
+          key={cat.id}
+          category={cat}
+          onConfirm={(optId) => confirmMut.mutate({ categoryId: cat.id, optionId: optId })}
+          isConfirming={confirmMut.isPending && confirmMut.variables?.categoryId === cat.id}
+        />
+      ))}
     </div>
   )
 }
 
 // ── Timeline ───────────────────────────────────────────────────────────────
 
-function TimelineSection({
+function TimelineTab({
   milestones,
   onApprove,
   approvingId,
   readOnly,
 }: {
-  milestones: PortalMilestone[]
-  onApprove: (milestoneId: string) => void
+  milestones:  PortalMilestone[]
+  onApprove:   (milestoneId: string) => void
   approvingId: string | null
-  readOnly?: boolean
+  readOnly?:   boolean
 }) {
   if (milestones.length === 0) {
     return (
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-base font-semibold text-gray-900">Timeline</h2>
+      <div className="mt-12 text-center">
         <p className="text-sm text-gray-400">No milestones shared yet.</p>
       </div>
     )
@@ -400,8 +620,6 @@ function TimelineSection({
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-4 text-base font-semibold text-gray-900">Timeline</h2>
-
       <div className="space-y-1">
         {milestones.map((m, i) => {
           const done          = m.status === 'complete' || m.status === 'approved'
@@ -420,7 +638,7 @@ function TimelineSection({
                 }`}>
                   {done ? '✓' : i + 1}
                 </div>
-                {!isLast && <div className="mt-1 w-px flex-1 bg-gray-200" />}
+                {!isLast && <div className="mt-1 w-px flex-1 bg-gray-200"/>}
               </div>
 
               <div className="min-w-0 flex-1 pb-4">
@@ -434,6 +652,7 @@ function TimelineSection({
                     <span className="shrink-0 text-xs text-gray-400">Due {fmtDateShort(m.due_date)}</span>
                   ) : null}
                 </div>
+
                 {needsApproval && (
                   <div className="mt-1.5 flex items-center gap-3">
                     <p className="text-xs font-medium text-amber-600">
@@ -451,7 +670,9 @@ function TimelineSection({
                   </div>
                 )}
                 {m.requires_client_approval && m.client_approved_at && !done && (
-                  <p className="mt-0.5 text-xs text-green-600">✓ Approved by you {fmtDateShort(m.client_approved_at)}</p>
+                  <p className="mt-0.5 text-xs text-green-600">
+                    ✓ Approved {fmtDateShort(m.client_approved_at)}
+                  </p>
                 )}
               </div>
             </div>
@@ -464,46 +685,21 @@ function TimelineSection({
 
 // ── Invoices ───────────────────────────────────────────────────────────────
 
-function InvoicesSection({ invoices }: { invoices: PortalInvoice[] }) {
-  const outstanding = invoices.filter((i) => i.balance_due_cents > 0)
-  const paid        = invoices.filter((i) => i.balance_due_cents === 0)
-
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-4 text-base font-semibold text-gray-900">Invoices</h2>
-
-      {invoices.length === 0 ? (
-        <p className="text-sm text-gray-400">No invoices yet.</p>
-      ) : (
-        <div className="space-y-3">
-          {outstanding.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Outstanding</p>
-              <div className="space-y-2">
-                {outstanding.map((inv) => <InvoiceRow key={inv.id} inv={inv} />)}
-              </div>
-            </div>
-          )}
-          {paid.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Paid</p>
-              <div className="space-y-2">
-                {paid.map((inv) => <InvoiceRow key={inv.id} inv={inv} />)}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function InvoiceRow({ inv }: { inv: PortalInvoice }) {
   const isPaid = inv.balance_due_cents === 0
   return (
     <div className="flex items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-base">
-        {isPaid ? '✅' : '💳'}
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base ${isPaid ? 'bg-green-50' : 'bg-amber-50'}`}>
+        {isPaid ? (
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-green-600">
+            <path d="M4 10l4 4 8-8"/>
+          </svg>
+        ) : (
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-amber-600">
+            <circle cx="10" cy="10" r="7.5"/>
+            <path d="M10 6.5V7m0 6v.5M7.75 8.5A2.25 2.25 0 0110 7a2.25 2.25 0 012.25 2.25c0 1.24-1 2.25-2.25 2.25A2.25 2.25 0 007.75 13.75"/>
+          </svg>
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-gray-900">{inv.invoice_number}</p>
@@ -521,91 +717,127 @@ function InvoiceRow({ inv }: { inv: PortalInvoice }) {
   )
 }
 
-// ── Change orders ──────────────────────────────────────────────────────────
+function FinancesTab({
+  invoices,
+  changeOrders,
+}: {
+  invoices:     PortalInvoice[]
+  changeOrders: PortalChangeOrder[]
+}) {
+  const outstanding = invoices.filter((i) => i.balance_due_cents > 0)
+  const paid        = invoices.filter((i) => i.balance_due_cents === 0)
 
-const CO_STATUS_LABEL: Record<string, string> = {
-  pending_approval: 'Pending',
-  approved:         'Approved',
-}
-const CO_STATUS_COLOR: Record<string, string> = {
-  pending_approval: 'bg-amber-100 text-amber-700',
-  approved:         'bg-green-100 text-green-700',
-}
+  const CO_STATUS_LABEL: Record<string, string> = {
+    pending_approval: 'Pending',
+    approved:         'Approved',
+  }
+  const CO_STATUS_COLOR: Record<string, string> = {
+    pending_approval: 'bg-amber-100 text-amber-700',
+    approved:         'bg-green-100 text-green-700',
+  }
 
-function ChangeOrdersSection({ changeOrders }: { changeOrders: PortalChangeOrder[] }) {
-  if (changeOrders.length === 0) return null
-
-  const approvedTotal = changeOrders
+  const approvedCoTotal = changeOrders
     .filter((co) => co.co_status === 'approved')
     .reduce((sum, co) => sum + co.amount_cents, 0)
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <h2 className="text-base font-semibold text-gray-900">Change Orders</h2>
-        {approvedTotal !== 0 && (
-          <div className="text-right shrink-0">
-            <p className="text-xs text-gray-500">Approved total</p>
-            <p className={`text-sm font-semibold tabular-nums ${approvedTotal >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
-              {approvedTotal >= 0 ? '+' : ''}{formatMoney(approvedTotal)}
-            </p>
+    <div className="space-y-4">
+      {/* Invoices */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-4 text-base font-semibold text-gray-900">Invoices</h2>
+        {invoices.length === 0 ? (
+          <p className="text-sm text-gray-400">No invoices yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {outstanding.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Outstanding</p>
+                <div className="space-y-2">
+                  {outstanding.map((inv) => <InvoiceRow key={inv.id} inv={inv}/>)}
+                </div>
+              </div>
+            )}
+            {paid.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Paid</p>
+                <div className="space-y-2">
+                  {paid.map((inv) => <InvoiceRow key={inv.id} inv={inv}/>)}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <div className="space-y-2">
-        {changeOrders.map((co) => {
-          const label = CO_STATUS_LABEL[co.co_status ?? ''] ?? co.co_status ?? ''
-          const color = CO_STATUS_COLOR[co.co_status ?? ''] ?? 'bg-gray-100 text-gray-500'
-          return (
-            <div key={co.id} className="flex items-start gap-3 rounded-xl border border-gray-100 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs text-gray-400">{co.co_number}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${color}`}>
-                    {label}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-sm font-medium text-gray-900">
-                  {co.title || co.description || '—'}
+      {/* Change orders */}
+      {changeOrders.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <h2 className="text-base font-semibold text-gray-900">Change Orders</h2>
+            {approvedCoTotal !== 0 && (
+              <div className="shrink-0 text-right">
+                <p className="text-xs text-gray-500">Approved total</p>
+                <p className={`text-sm font-semibold tabular-nums ${approvedCoTotal >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                  {approvedCoTotal >= 0 ? '+' : ''}{formatMoney(approvedCoTotal)}
                 </p>
-                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                  {co.approved_at && <span>Approved {fmtDateShort(co.approved_at)}</span>}
-                  {co.schedule_impact_days != null && co.schedule_impact_days !== 0 && (
-                    <span>{co.schedule_impact_days > 0 ? '+' : ''}{co.schedule_impact_days} day{Math.abs(co.schedule_impact_days) !== 1 ? 's' : ''}</span>
-                  )}
-                </div>
               </div>
-              <p className={`shrink-0 text-sm font-semibold tabular-nums ${co.amount_cents >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
-                {co.amount_cents >= 0 ? '+' : ''}{formatMoney(co.amount_cents)}
-              </p>
-            </div>
-          )
-        })}
-      </div>
+            )}
+          </div>
+          <div className="space-y-2">
+            {changeOrders.map((co) => {
+              const label = CO_STATUS_LABEL[co.co_status ?? ''] ?? co.co_status ?? ''
+              const color = CO_STATUS_COLOR[co.co_status ?? ''] ?? 'bg-gray-100 text-gray-500'
+              return (
+                <div key={co.id} className="flex items-start gap-3 rounded-xl border border-gray-100 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-gray-400">{co.co_number}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${color}`}>
+                        {label}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-sm font-medium text-gray-900">
+                      {co.title || co.description || '—'}
+                    </p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                      {co.approved_at && <span>Approved {fmtDateShort(co.approved_at)}</span>}
+                      {co.schedule_impact_days != null && co.schedule_impact_days !== 0 && (
+                        <span>{co.schedule_impact_days > 0 ? '+' : ''}{co.schedule_impact_days} day{Math.abs(co.schedule_impact_days) !== 1 ? 's' : ''}</span>
+                      )}
+                    </div>
+                  </div>
+                  <p className={`shrink-0 text-sm font-semibold tabular-nums ${co.amount_cents >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                    {co.amount_cents >= 0 ? '+' : ''}{formatMoney(co.amount_cents)}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-// ── Portal photo lightbox ──────────────────────────────────────────────────
+// ── Daily log photos ───────────────────────────────────────────────────────
 
 function PortalPhotoLightbox({
   photos,
   initialIndex,
   onClose,
 }: {
-  photos: DailyLogPhoto[]
+  photos:       DailyLogPhoto[]
   initialIndex: number
-  onClose: () => void
+  onClose:      () => void
 }) {
   const [current, setCurrent] = useState(initialIndex)
   const photo = photos[current]
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape')      onClose()
-      if (e.key === 'ArrowLeft')   setCurrent((i) => Math.max(0, i - 1))
-      if (e.key === 'ArrowRight')  setCurrent((i) => Math.min(photos.length - 1, i + 1))
+      if (e.key === 'Escape')     onClose()
+      if (e.key === 'ArrowLeft')  setCurrent((i) => Math.max(0, i - 1))
+      if (e.key === 'ArrowRight') setCurrent((i) => Math.min(photos.length - 1, i + 1))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -622,26 +854,22 @@ function PortalPhotoLightbox({
       >
         ✕
       </button>
-
       {photos.length > 1 && (
-        <p className="absolute top-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
+        <p className="absolute left-1/2 top-4 -translate-x-1/2 text-sm text-white/70">
           {current + 1} / {photos.length}
         </p>
       )}
-
       <img
         src={photo.signedUrl}
         alt={photo.caption ?? `Photo ${current + 1}`}
         className="max-h-[82vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       />
-
       {photo.caption && (
         <p className="mt-3 max-w-lg text-center text-sm text-white/80">{photo.caption}</p>
       )}
-
       {photos.length > 1 && (
-        <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-3 pointer-events-none">
+        <div className="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center justify-between px-3">
           <button
             onClick={(e) => { e.stopPropagation(); setCurrent((i) => Math.max(0, i - 1)) }}
             disabled={current === 0}
@@ -662,22 +890,20 @@ function PortalPhotoLightbox({
   )
 }
 
-// ── Portal log photos (lazy-fetched on expand) ─────────────────────────────
-
 function PortalLogPhotos({ logId }: { logId: string }) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   const { data: photos = [], isLoading } = useQuery({
     queryKey:  ['portal-log-photos', logId],
     queryFn:   () => getDailyLogPhotos(supabase, logId),
-    staleTime: 300_000, // 5 min — portal is read-only, no need to refresh often
+    staleTime: 300_000,
   })
 
   if (isLoading) {
     return (
       <div className="mt-3 grid grid-cols-3 gap-2">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="aspect-square animate-pulse rounded-xl bg-gray-200" />
+          <div key={i} className="aspect-square animate-pulse rounded-xl bg-gray-200"/>
         ))}
       </div>
     )
@@ -703,7 +929,6 @@ function PortalLogPhotos({ logId }: { logId: string }) {
           </button>
         ))}
       </div>
-
       {lightboxIndex !== null && (
         <PortalPhotoLightbox
           photos={photos}
@@ -715,12 +940,16 @@ function PortalLogPhotos({ logId }: { logId: string }) {
   )
 }
 
-// ── Daily logs (Field Updates) ─────────────────────────────────────────────
+// ── Updates tab (daily logs with pagination) ───────────────────────────────
 
-function DailyLogsSection({ logs }: { logs: PortalDailyLog[] }) {
+const LOGS_PER_PAGE = 10
+
+function UpdatesTab({ logs }: { logs: PortalDailyLog[] }) {
+  const [shown, setShown] = useState(LOGS_PER_PAGE)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  if (logs.length === 0) return null
+  const visible = logs.slice(0, shown)
+  const hasMore = logs.length > shown
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -731,116 +960,147 @@ function DailyLogsSection({ logs }: { logs: PortalDailyLog[] }) {
     })
   }
 
+  if (logs.length === 0) {
+    return (
+      <div className="mt-12 text-center">
+        <p className="text-sm text-gray-400">No field updates published yet.</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-      <div className="border-b border-gray-100 px-5 py-4">
-        <h2 className="text-base font-semibold text-gray-900">Field Updates</h2>
-        <p className="mt-0.5 text-xs text-gray-500">{logs.length} update{logs.length !== 1 ? 's' : ''} from your build team</p>
-      </div>
+    <div className="space-y-3">
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <div className="divide-y divide-gray-100">
+          {visible.map((log) => {
+            const isExpanded = expanded.has(log.id)
+            const summary    = log.ai_client_summary || log.work_performed
+            const date       = new Date(log.date + 'T00:00:00')
+            const dayName    = date.toLocaleDateString('en-US', { weekday: 'long' })
+            const dateStr    = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+            const hasDetails = !!(log.materials_delivered || log.equipment_used || log.issues_or_delays)
 
-      <div className="divide-y divide-gray-100">
-        {logs.map((log) => {
-          const isExpanded = expanded.has(log.id)
-          const summary = log.ai_client_summary || log.work_performed
-          const date = new Date(log.date + 'T00:00:00')
-          const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
-          const dateStr = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-          const hasDetails = !!(log.materials_delivered || log.equipment_used || log.issues_or_delays)
-          // Always expandable: photos are lazy-loaded and we don't know until fetch
+            return (
+              <div key={log.id} className="px-5 py-4">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{dayName}</p>
+                    <p className="text-xs text-gray-400">{dateStr}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3 text-xs text-gray-400">
+                    {log.weather && (
+                      <span>{log.weather}{log.temperature_f != null ? ` · ${log.temperature_f}°F` : ''}</span>
+                    )}
+                    {log.crew_count != null && (
+                      <span>{log.crew_count} crew</span>
+                    )}
+                  </div>
+                </div>
 
-          return (
-            <div key={log.id} className="px-5 py-4">
-              {/* Date header */}
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">{dayName}</p>
-                  <p className="text-xs text-gray-400">{dateStr}</p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0 text-xs text-gray-400">
-                  {log.weather && (
-                    <span>🌤 {log.weather}{log.temperature_f != null ? ` · ${log.temperature_f}°F` : ''}</span>
-                  )}
-                  {log.crew_count != null && (
-                    <span>👷 {log.crew_count}</span>
-                  )}
-                </div>
+                <p className="text-sm leading-relaxed text-gray-700">{summary}</p>
+
+                {isExpanded && <PortalLogPhotos logId={log.id}/>}
+
+                {isExpanded && hasDetails && (
+                  <div className="mt-3 space-y-2 rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-600">
+                    {log.materials_delivered && (
+                      <div>
+                        <p className="mb-0.5 font-semibold text-gray-700">Materials delivered</p>
+                        <p>{log.materials_delivered}</p>
+                      </div>
+                    )}
+                    {log.equipment_used && (
+                      <div>
+                        <p className="mb-0.5 font-semibold text-gray-700">Equipment used</p>
+                        <p>{log.equipment_used}</p>
+                      </div>
+                    )}
+                    {log.issues_or_delays && (
+                      <div>
+                        <p className="mb-0.5 font-semibold text-amber-700">Issues / delays</p>
+                        <p className="text-amber-700">{log.issues_or_delays}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => toggle(log.id)}
+                  className="mt-2 text-xs text-brand-600 transition-colors hover:text-brand-700"
+                >
+                  {isExpanded ? 'Show less ▲' : (hasDetails ? 'More details ▼' : 'Photos ▼')}
+                </button>
               </div>
-
-              {/* Summary text */}
-              <p className="text-sm text-gray-700 leading-relaxed">{summary}</p>
-
-              {/* Photos — lazy-fetched when row is expanded */}
-              {isExpanded && <PortalLogPhotos logId={log.id} />}
-
-              {/* Expandable details (always expandable — photos also live here) */}
-              {isExpanded && hasDetails && (
-                <div className="mt-3 space-y-2 rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-600">
-                  {log.materials_delivered && (
-                    <div>
-                      <p className="font-semibold text-gray-700 mb-0.5">Materials delivered</p>
-                      <p>{log.materials_delivered}</p>
-                    </div>
-                  )}
-                  {log.equipment_used && (
-                    <div>
-                      <p className="font-semibold text-gray-700 mb-0.5">Equipment used</p>
-                      <p>{log.equipment_used}</p>
-                    </div>
-                  )}
-                  {log.issues_or_delays && (
-                    <div>
-                      <p className="font-semibold text-amber-700 mb-0.5">Issues / delays</p>
-                      <p className="text-amber-700">{log.issues_or_delays}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <button
-                onClick={() => toggle(log.id)}
-                className="mt-2 text-xs text-brand-600 hover:text-brand-700 transition-colors"
-              >
-                {isExpanded ? 'Show less ▲' : (hasDetails ? 'More details ▼' : 'Photos ▼')}
-              </button>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
+
+      {hasMore && (
+        <button
+          onClick={() => setShown((n) => n + LOGS_PER_PAGE)}
+          className="w-full rounded-xl border border-gray-200 bg-white py-3 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50"
+        >
+          Load more · {logs.length - shown} remaining
+        </button>
+      )}
+
+      {!hasMore && logs.length > LOGS_PER_PAGE && (
+        <p className="text-center text-xs text-gray-400">All {logs.length} updates shown</p>
+      )}
     </div>
   )
 }
 
-// ── Documents ──────────────────────────────────────────────────────────────
+// ── Documents tab ──────────────────────────────────────────────────────────
 
-const DOC_EMOJI: Record<string, string> = {
-  plan: '📐', permit: '🏛️', contract: '📄', change_order: '🔄',
-  invoice: '💳', photo: '📷', video: '🎥', specification: '📝',
-  warranty: '✅', report: '📊', other: '📎',
+const DOC_ICON: Record<string, React.ReactNode> = {}
+
+function DocIcon({ type }: { type: string }) {
+  const color = {
+    plan: 'bg-blue-50 text-blue-600', permit: 'bg-purple-50 text-purple-600',
+    contract: 'bg-gray-50 text-gray-600', invoice: 'bg-amber-50 text-amber-600',
+    photo: 'bg-teal-50 text-teal-600', warranty: 'bg-green-50 text-green-600',
+    report: 'bg-indigo-50 text-indigo-600',
+  }[type] ?? 'bg-gray-50 text-gray-400'
+
+  return (
+    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${color}`}>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <path d="M5.5 2.5h6l4 4v11a1 1 0 01-1 1h-9a1 1 0 01-1-1v-14a1 1 0 011-1z"/>
+        <polyline points="11.5,2.5 11.5,6.5 15.5,6.5"/>
+      </svg>
+    </div>
+  )
 }
 
-function DocumentsSection({ documents }: { documents: PortalDocument[] }) {
+void DOC_ICON // suppress unused warning
+
+function DocumentsTab({ documents }: { documents: PortalDocument[] }) {
+  if (documents.length === 0) {
+    return (
+      <div className="mt-12 text-center">
+        <p className="text-sm text-gray-400">No documents shared yet.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-4 text-base font-semibold text-gray-900">Documents</h2>
-
-      {documents.length === 0 ? (
-        <p className="text-sm text-gray-400">No documents shared yet.</p>
-      ) : (
-        <div className="space-y-2">
-          {documents.map((doc) => (
-            <div key={doc.id} className="flex items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
-              <span className="shrink-0 text-xl">{DOC_EMOJI[doc.type] ?? '📎'}</span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-gray-900">{doc.name}</p>
-                <p className="text-xs text-gray-400">
-                  {fmtDate(doc.created_at)}
-                  {doc.file_size_bytes ? ` · ${fmtBytes(doc.file_size_bytes)}` : ''}
-                </p>
-              </div>
+      <div className="space-y-2">
+        {documents.map((doc) => (
+          <div key={doc.id} className="flex items-center gap-3 rounded-xl border border-gray-100 px-3 py-3">
+            <DocIcon type={doc.type}/>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-gray-900">{doc.name}</p>
+              <p className="text-xs text-gray-400">
+                {fmtDate(doc.created_at)}
+                {doc.file_size_bytes ? ` · ${fmtBytes(doc.file_size_bytes)}` : ''}
+              </p>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -850,17 +1110,25 @@ function DocumentsSection({ documents }: { documents: PortalDocument[] }) {
 function PortalSkeleton() {
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 shadow-sm">
-        <Skeleton className="h-8 w-24" />
-        <Skeleton className="h-3 w-full rounded-full" />
-        <div className="grid grid-cols-2 gap-4 pt-2">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+      {/* Fake tab bar */}
+      <div className="sticky top-14 z-10 -mx-4 mb-5 border-b border-gray-200 bg-white px-4">
+        <div className="flex gap-1 py-2">
+          {[48, 40, 56, 40, 48, 52].map((w, i) => (
+            <div key={i} className="mx-1 h-8 animate-pulse rounded-md bg-gray-100" style={{ width: w }}/>
+          ))}
         </div>
       </div>
       <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 shadow-sm">
-        <Skeleton className="h-5 w-24" />
-        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+        <Skeleton className="h-8 w-20"/>
+        <Skeleton className="h-3 w-full rounded-full"/>
+        <div className="grid grid-cols-2 gap-4 pt-2">
+          <Skeleton className="h-10 w-full"/>
+          <Skeleton className="h-10 w-full"/>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3 shadow-sm">
+        <Skeleton className="h-5 w-32"/>
+        {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full"/>)}
       </div>
     </div>
   )
@@ -869,9 +1137,19 @@ function PortalSkeleton() {
 // ── Main component ─────────────────────────────────────────────────────────
 
 export function PortalProjectPage() {
-  const { id: projectId }   = useParams<{ id: string }>()
+  const { id: projectId }            = useParams<{ id: string }>()
   const { customer, isStaffPreview } = usePortalAuth()
-  const queryClient         = useQueryClient()
+  const queryClient                  = useQueryClient()
+
+  // Tab state: URL search param → persists on refresh; default = overview
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = (searchParams.get('tab') as TabId | null) ?? 'overview'
+
+  function setTab(id: TabId) {
+    setSearchParams(id === 'overview' ? {} : { tab: id }, { replace: true })
+  }
+
+  // ── Data ────────────────────────────────────────────────────────────────
 
   const { data, isLoading, error } = useQuery({
     queryKey:  ['portal-project', projectId],
@@ -880,8 +1158,7 @@ export function PortalProjectPage() {
     staleTime: 60_000,
   })
 
-  // Selections are client-specific — staff preview skips them (viewable in main app)
-  const { data: selections } = useQuery({
+  const { data: selections, isLoading: selLoading } = useQuery({
     queryKey:  ['portal-selections', projectId],
     queryFn:   () => getPortalSelections(supabase, projectId!, customer!.id),
     enabled:   !!projectId && !!customer?.id && !isStaffPreview,
@@ -890,10 +1167,14 @@ export function PortalProjectPage() {
 
   const approveMut = useMutation({
     mutationFn: (milestoneId: string) => approvePortalMilestone(supabase, milestoneId),
-    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['portal-project', projectId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['portal-project', projectId] })
+    },
   })
 
-  if (isLoading) return <PortalSkeleton />
+  // ── Guards ───────────────────────────────────────────────────────────────
+
+  if (isLoading) return <PortalSkeleton/>
 
   if (error || !data) {
     return (
@@ -907,44 +1188,103 @@ export function PortalProjectPage() {
   const job     = project.job
   const address = [job?.address_line1, job?.city, job?.state].filter(Boolean).join(', ')
 
+  // ── Badge counts ─────────────────────────────────────────────────────────
+
+  const pendingApprovalCount = milestones.filter(
+    (m) => m.requires_client_approval && !m.client_approved_at
+        && m.status !== 'complete' && m.status !== 'approved',
+  ).length
+
+  const pendingSelectionCount = (selections ?? []).filter(
+    (c) => ['pending', 'client_choosing'].includes(c.status) && !c.selection,
+  ).length
+
+  const overviewBadge   = pendingApprovalCount + pendingSelectionCount
+  const financesBadge   = invoices.filter((i) => i.balance_due_cents > 0).length
+  const selectionsBadge = pendingSelectionCount
+
+  // ── Tab definitions ───────────────────────────────────────────────────────
+
+  const tabs: TabDef[] = [
+    { id: 'overview',   label: 'Overview',   icon: <IconOverview/>,   badge: overviewBadge > 0 ? overviewBadge : undefined },
+    { id: 'timeline',   label: 'Timeline',   icon: <IconTimeline/>   },
+    { id: 'finances',   label: 'Finances',   icon: <IconFinances/>,   badge: financesBadge > 0 ? financesBadge : undefined },
+    { id: 'updates',    label: 'Updates',    icon: <IconUpdates/>    },
+    { id: 'documents',  label: 'Documents',  icon: <IconDocuments/>  },
+    ...(!isStaffPreview
+      ? [{ id: 'selections' as TabId, label: 'Selections', icon: <IconSelections/>, badge: selectionsBadge > 0 ? selectionsBadge : undefined }]
+      : []
+    ),
+  ]
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-4">
+    <div>
       {/* Project header */}
-      <div>
+      <div className="mb-4">
         <h1 className="text-2xl font-bold text-gray-900">{job?.job_name ?? 'Your Project'}</h1>
         {address && <p className="mt-0.5 text-sm text-gray-500">📍 {address}</p>}
       </div>
 
-      <ProgressCard
-        milestones={milestones}
-        startDate={job?.start_date ?? null}
-        targetCompletion={job?.target_completion ?? null}
-        contractCents={job?.current_contract_cents ?? job?.contract_value_cents ?? null}
-      />
+      {/* Tab bar — sticky just below portal shell header */}
+      <TabBar tabs={tabs} active={activeTab} onChange={setTab}/>
 
-      {/* Selections first — actionable items above the fold (hidden in staff preview) */}
-      {!isStaffPreview && selections && selections.length > 0 && customer && (
-        <SelectionsSection
-          categories={selections}
-          project={project}
-          customerId={customer.id}
+      {/* Tab content */}
+      {activeTab === 'overview' && (
+        <div className="space-y-4">
+          <ProgressCard
+            milestones={milestones}
+            startDate={job?.start_date ?? null}
+            targetCompletion={job?.target_completion ?? null}
+            contractCents={job?.current_contract_cents ?? job?.contract_value_cents ?? null}
+          />
+          <OverviewActions
+            milestones={milestones}
+            selections={selections}
+            invoices={invoices}
+            onApprove={(id) => approveMut.mutate(id)}
+            approvingId={approveMut.isPending ? (approveMut.variables ?? null) : null}
+            onNavigate={setTab}
+            isStaffPreview={isStaffPreview}
+          />
+        </div>
+      )}
+
+      {activeTab === 'timeline' && (
+        <TimelineTab
+          milestones={milestones}
+          onApprove={(id) => approveMut.mutate(id)}
+          approvingId={approveMut.isPending ? (approveMut.variables ?? null) : null}
+          readOnly={isStaffPreview}
         />
       )}
 
-      <TimelineSection
-        milestones={milestones}
-        onApprove={(id) => approveMut.mutate(id)}
-        approvingId={approveMut.isPending ? (approveMut.variables ?? null) : null}
-        readOnly={isStaffPreview}
-      />
+      {activeTab === 'finances' && (
+        <FinancesTab invoices={invoices} changeOrders={changeOrders}/>
+      )}
 
-      <InvoicesSection invoices={invoices} />
+      {activeTab === 'updates' && (
+        <UpdatesTab logs={dailyLogs}/>
+      )}
 
-      <ChangeOrdersSection changeOrders={changeOrders} />
+      {activeTab === 'documents' && (
+        <DocumentsTab documents={documents}/>
+      )}
 
-      <DailyLogsSection logs={dailyLogs} />
-
-      <DocumentsSection documents={documents} />
+      {activeTab === 'selections' && !isStaffPreview && (
+        selLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-2xl"/>)}
+          </div>
+        ) : (
+          <SelectionsTab
+            categories={selections ?? []}
+            project={project}
+            customerId={customer!.id}
+          />
+        )
+      )}
     </div>
   )
 }
