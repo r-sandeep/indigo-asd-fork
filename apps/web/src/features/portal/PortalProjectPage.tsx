@@ -382,10 +382,12 @@ function TimelineSection({
   milestones,
   onApprove,
   approvingId,
+  readOnly,
 }: {
   milestones: PortalMilestone[]
   onApprove: (milestoneId: string) => void
   approvingId: string | null
+  readOnly?: boolean
 }) {
   if (milestones.length === 0) {
     return (
@@ -434,14 +436,18 @@ function TimelineSection({
                 </div>
                 {needsApproval && (
                   <div className="mt-1.5 flex items-center gap-3">
-                    <p className="text-xs font-medium text-amber-600">Your approval is required</p>
-                    <button
-                      onClick={() => onApprove(m.id)}
-                      disabled={isApproving}
-                      className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
-                    >
-                      {isApproving ? 'Approving…' : 'Approve'}
-                    </button>
+                    <p className="text-xs font-medium text-amber-600">
+                      {readOnly ? 'Client approval required' : 'Your approval is required'}
+                    </p>
+                    {!readOnly && (
+                      <button
+                        onClick={() => onApprove(m.id)}
+                        disabled={isApproving}
+                        className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+                      >
+                        {isApproving ? 'Approving…' : 'Approve'}
+                      </button>
+                    )}
                   </div>
                 )}
                 {m.requires_client_approval && m.client_approved_at && !done && (
@@ -864,7 +870,7 @@ function PortalSkeleton() {
 
 export function PortalProjectPage() {
   const { id: projectId }   = useParams<{ id: string }>()
-  const { customer }        = usePortalAuth()
+  const { customer, isStaffPreview } = usePortalAuth()
   const queryClient         = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
@@ -874,10 +880,11 @@ export function PortalProjectPage() {
     staleTime: 60_000,
   })
 
+  // Selections are client-specific — staff preview skips them (viewable in main app)
   const { data: selections } = useQuery({
     queryKey:  ['portal-selections', projectId],
     queryFn:   () => getPortalSelections(supabase, projectId!, customer!.id),
-    enabled:   !!projectId && !!customer?.id,
+    enabled:   !!projectId && !!customer?.id && !isStaffPreview,
     staleTime: 30_000,
   })
 
@@ -915,8 +922,8 @@ export function PortalProjectPage() {
         contractCents={job?.current_contract_cents ?? job?.contract_value_cents ?? null}
       />
 
-      {/* Selections first — actionable items above the fold */}
-      {selections && selections.length > 0 && customer && (
+      {/* Selections first — actionable items above the fold (hidden in staff preview) */}
+      {!isStaffPreview && selections && selections.length > 0 && customer && (
         <SelectionsSection
           categories={selections}
           project={project}
@@ -928,6 +935,7 @@ export function PortalProjectPage() {
         milestones={milestones}
         onApprove={(id) => approveMut.mutate(id)}
         approvingId={approveMut.isPending ? (approveMut.variables ?? null) : null}
+        readOnly={isStaffPreview}
       />
 
       <InvoicesSection invoices={invoices} />

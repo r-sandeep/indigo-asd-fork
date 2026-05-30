@@ -1,17 +1,21 @@
 import { Navigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getPortalProjects } from '@indigo/shared'
+import { getPortalProjects, getStaffPortalProjects } from '@indigo/shared'
 import { supabase } from '@/lib/supabase'
 import { usePortalAuth } from '@/hooks/usePortalAuth'
 import { Skeleton } from '@/components/ui/Skeleton'
 
 export function PortalProjectsPage() {
-  const { customer } = usePortalAuth()
+  const { customer, isStaffPreview } = usePortalAuth()
 
   const { data: projects, isLoading } = useQuery({
-    queryKey:  ['portal-projects', customer?.id],
-    queryFn:   () => getPortalProjects(supabase, customer!.id),
-    enabled:   !!customer?.id,
+    queryKey:  isStaffPreview
+      ? ['staff-portal-projects']
+      : ['portal-projects', customer?.id],
+    queryFn:   isStaffPreview
+      ? () => getStaffPortalProjects(supabase)
+      : () => getPortalProjects(supabase, customer!.id),
+    enabled:   isStaffPreview || !!customer?.id,
     staleTime: 60_000,
   })
 
@@ -29,7 +33,7 @@ export function PortalProjectsPage() {
   }
 
   // If customer only has one project, go straight there
-  if (projects && projects.length === 1) {
+  if (!isStaffPreview && projects && projects.length === 1) {
     return <Navigate to={`/portal/projects/${projects[0].id}`} replace />
   }
 
@@ -37,9 +41,13 @@ export function PortalProjectsPage() {
     return (
       <div className="mt-12 text-center">
         <div className="text-4xl">🏗️</div>
-        <h2 className="mt-4 text-base font-semibold text-gray-900">No projects yet</h2>
+        <h2 className="mt-4 text-base font-semibold text-gray-900">
+          {isStaffPreview ? 'No projects found' : 'No projects yet'}
+        </h2>
         <p className="mt-1 text-sm text-gray-500">
-          Your builder hasn't linked any projects to your portal account yet. Contact them for access.
+          {isStaffPreview
+            ? 'No projects exist in this tenant yet.'
+            : 'Your builder hasn\'t linked any projects to your portal account yet. Contact them for access.'}
         </p>
       </div>
     )
@@ -47,7 +55,9 @@ export function PortalProjectsPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold text-gray-900">Your Projects</h1>
+      <h1 className="mb-4 text-xl font-semibold text-gray-900">
+        {isStaffPreview ? 'All Projects' : 'Your Projects'}
+      </h1>
       <div className="space-y-3">
         {projects.map((project) => {
           const job = project.job

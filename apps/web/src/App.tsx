@@ -81,10 +81,11 @@ function AuthRoutes() {
 // ── Portal auth guard ──────────────────────────────────────────────────────
 
 function RequirePortalAuth({ children }: { children: React.ReactNode }) {
-  const { user, customer, isLoading } = usePortalAuth()
+  const { user, customer, isLoading, isStaffPreview } = usePortalAuth()
   if (isLoading) return null
   if (!user) return <Navigate to="/portal/login" replace />
-  if (!customer) {
+  // Staff (admin/owner) get preview access even without a customer record
+  if (!customer && !isStaffPreview) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
         <div className="max-w-sm text-center">

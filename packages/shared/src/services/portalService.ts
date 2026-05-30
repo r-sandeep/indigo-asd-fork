@@ -237,6 +237,31 @@ export async function getCustomerByUserId(
   return data as PortalCustomer | null
 }
 
+/**
+ * Used by tenant admins/owners in staff portal preview mode.
+ * Returns ALL projects in the user's tenant (RLS-filtered), not scoped to a single customer.
+ */
+export async function getStaffPortalProjects(
+  client: SupabaseClient,
+): Promise<PortalProject[]> {
+  const { data, error } = await client
+    .from('projects')
+    .select(`
+      id, tenant_id, job_id, created_at,
+      job:jobs (
+        id, job_name, job_number,
+        project_status, project_type,
+        address_line1, city, state,
+        contract_value_cents, current_contract_cents,
+        start_date, target_completion, actual_completion
+      )
+    `)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as PortalProject[]
+}
+
 export async function getPortalProjects(
   client: SupabaseClient,
   customerId: string,
