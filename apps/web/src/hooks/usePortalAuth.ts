@@ -39,7 +39,11 @@ export function usePortalAuthListener() {
       // Auto-link on first login: if the user isn't linked yet, try to match
       // their auth email to a customers row and set portal_user_id via RPC.
       if (!customer) {
-        customer = await linkCustomerByEmail(supabase, userId)
+        try {
+          customer = await linkCustomerByEmail(supabase, userId)
+        } catch {
+          // link attempt failed (e.g. staff user with no customer row) — continue to staff check
+        }
       }
 
       if (customer) {
@@ -49,17 +53,17 @@ export function usePortalAuthListener() {
 
       // Not a client — check if they're a tenant admin or owner.
       // Admins and owners get read-only "staff preview" access to all portals.
-      const { data: adminMemberships } = await supabase
-        .from('tenant_memberships')
+      const { data: adminMemberships, error: memberErr } = await supabase
+        .from('tenant_members')
         .select('role')
         .eq('user_id', userId)
         .in('role', ['admin', 'owner'])
         .limit(1)
 
-      if (adminMemberships && adminMemberships.length > 0) {
+      if (!memberErr && adminMemberships && adminMemberships.length > 0) {
         setStaffPreview(true)
       } else {
-        setCustomer(null) // no access
+        setCustomer(null) // not a client and not an admin/owner
       }
     } catch {
       setCustomer(null)
