@@ -44,6 +44,10 @@ export interface PortalMilestone {
   client_approved_at: string | null
   sequence: number
   phase_id: string | null
+  // Payment schedule fields
+  triggers_invoice:      boolean
+  invoice_amount_cents:  number | null
+  linked_invoice_id:     string | null
 }
 
 export interface PortalInvoice {
@@ -318,10 +322,10 @@ export async function getPortalProjectData(
       .single(),
     client
       .from('milestones')
-      .select('id, name, status, due_date, completed_date, requires_client_approval, client_approved_at, sequence, phase_id')
+      .select('id, name, status, due_date, completed_date, requires_client_approval, client_approved_at, sequence, phase_id, triggers_invoice, invoice_amount_cents, linked_invoice_id')
       .eq('project_id', projectId)
       .eq('is_client_visible', true)
-      .order('sequence', { ascending: true }),
+      .order('due_date', { ascending: true, nullsFirst: false }),
     client
       .from('documents')
       .select('id, type, name, mime_type, file_size_bytes, created_at')

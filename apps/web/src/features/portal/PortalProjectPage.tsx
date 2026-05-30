@@ -597,19 +597,199 @@ function SelectionsTab({
   )
 }
 
-// ── Timeline ───────────────────────────────────────────────────────────────
+// ── Gantt view ─────────────────────────────────────────────────────────────
+
+function GanttView({
+  milestones,
+  startDate,
+  targetCompletion,
+}: {
+  milestones:        PortalMilestone[]
+  startDate:         string | null
+  targetCompletion:  string | null
+}) {
+  const withDates = milestones.filter((m) => m.due_date)
+
+  if (withDates.length === 0) {
+    return (
+      <div className="rounded-2xl border border-gray-200 bg-white px-5 py-8 shadow-sm text-center">
+        <p className="text-sm text-gray-400">No milestones with due dates to display on the Gantt.</p>
+      </div>
+    )
+  }
+
+  // ── Date range ────────────────────────────────────────────────────────────
+  const toTs = (s: string) => new Date(s + 'T00:00:00').getTime()
+  const dateTss = withDates.map((m) => toTs(m.due_date!))
+  const jobStartTs       = startDate         ? toTs(startDate)         : null
+  const jobEndTs         = targetCompletion  ? toTs(targetCompletion)  : null
+
+  const rawMin = Math.min(jobStartTs ?? dateTss[0], ...dateTss)
+  const rawMax = Math.max(jobEndTs   ?? dateTss[dateTss.length - 1], ...dateTss)
+  const rangeDays = Math.max(1, Math.round((rawMax - rawMin) / 86_400_000))
+
+  // Pad 5% on each side, minimum 5 days
+  const padMs      = Math.max(5, Math.ceil(rangeDays * 0.05)) * 86_400_000
+  const rangeStart = rawMin - padMs
+  const rangeEnd   = rawMax + padMs
+  const totalMs    = rangeEnd - rangeStart
+
+  function toPct(ts: number) { return ((ts - rangeStart) / totalMs) * 100 }
+
+  const today     = new Date(); today.setHours(0, 0, 0, 0)
+  const todayPct  = toPct(today.getTime())
+  const showToday = todayPct >= 0 && todayPct <= 100
+
+  // ── Month tick labels ─────────────────────────────────────────────────────
+  const months: { label: string; pct: number }[] = []
+  const cur = new Date(rangeStart); cur.setDate(1)
+  while (cur.getTime() <= rangeEnd) {
+    const p = toPct(cur.getTime())
+    if (p >= 0 && p <= 100) {
+      months.push({
+        label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        pct:   p,
+      })
+    }
+    cur.setMonth(cur.getMonth() + 1)
+  }
+
+  // Minimum track width: 5px/day, capped at reasonable scroll width
+  const trackMinPx = Math.max(480, rangeDays * 5)
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <div style={{ minWidth: `${trackMinPx + 176}px` }}>
+
+          {/* Month header row */}
+          <div className="flex border-b border-gray-100">
+            <div className="w-44 shrink-0"/>
+            <div className="relative flex-1 h-7">
+              {months.map((m, i) => (
+                <span
+                  key={i}
+                  className="absolute top-1 text-[10px] font-medium text-gray-400 whitespace-nowrap"
+                  style={{ left: `${m.pct}%`, transform: 'translateX(-50%)' }}
+                >
+                  {m.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Milestone rows */}
+          {milestones.map((m) => {
+            const done          = m.status === 'complete' || m.status === 'approved'
+            const needsApproval = m.requires_client_approval && !m.client_approved_at && !done
+            const pos           = m.due_date ? toPct(toTs(m.due_date)) : null
+
+            return (
+              <div key={m.id} className="flex items-center border-b border-gray-50 last:border-0 group">
+                {/* Name column */}
+                <div className="w-44 shrink-0 px-4 py-2.5">
+                  <p className={`text-xs font-medium truncate ${done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                    {m.name}
+                  </p>
+                  {m.due_date && (
+                    <p className="text-[10px] text-gray-400">{fmtDateShort(m.due_date)}</p>
+                  )}
+                </div>
+
+                {/* Timeline track */}
+                <div className="relative flex-1 h-10">
+                  {/* Today line */}
+                  {showToday && (
+                    <div
+                      className="absolute top-0 bottom-0 w-px bg-brand-300 opacity-60"
+                      style={{ left: `${todayPct}%` }}
+                    />
+                  )}
+
+                  {pos !== null ? (
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2"
+                      style={{ left: `${pos}%` }}
+                    >
+                      {/* Diamond marker */}
+                      <div className={`h-3 w-3 rotate-45 ring-2 ring-white ${
+                        done                       ? 'bg-green-500' :
+                        needsApproval              ? 'bg-amber-400' :
+                        m.status === 'in_progress' ? 'bg-brand-500' :
+                                                     'bg-gray-300'
+                      }`}/>
+                    </div>
+                  ) : (
+                    <span className="absolute top-1/2 left-2 -translate-y-1/2 text-[10px] italic text-gray-300">
+                      No date
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          {/* Today footer label */}
+          {showToday && (
+            <div className="relative flex border-t border-gray-100">
+              <div className="w-44 shrink-0"/>
+              <div className="relative flex-1 h-6">
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-brand-300 opacity-60"
+                  style={{ left: `${todayPct}%` }}
+                />
+                <span
+                  className="absolute top-0.5 text-[10px] font-semibold text-brand-600 whitespace-nowrap"
+                  style={{ left: `${todayPct}%`, transform: 'translateX(-50%)' }}
+                >
+                  Today
+                </span>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 px-4 py-2.5">
+        {[
+          { color: 'bg-green-500',  label: 'Complete'    },
+          { color: 'bg-brand-500',  label: 'In progress' },
+          { color: 'bg-amber-400',  label: 'Needs approval' },
+          { color: 'bg-gray-300',   label: 'Upcoming'    },
+        ].map(({ color, label }) => (
+          <span key={label} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+            <span className={`inline-block h-2.5 w-2.5 rotate-45 ${color}`}/>
+            {label}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Project Schedule (Timeline) tab ────────────────────────────────────────
+
+type ScheduleView = 'list' | 'gantt'
 
 function TimelineTab({
   milestones,
+  startDate,
+  targetCompletion,
   onApprove,
   approvingId,
   readOnly,
 }: {
-  milestones:  PortalMilestone[]
-  onApprove:   (milestoneId: string) => void
-  approvingId: string | null
-  readOnly?:   boolean
+  milestones:        PortalMilestone[]
+  startDate:         string | null
+  targetCompletion:  string | null
+  onApprove:         (milestoneId: string) => void
+  approvingId:       string | null
+  readOnly?:         boolean
 }) {
+  const [view, setView] = useState<ScheduleView>('list')
+
   if (milestones.length === 0) {
     return (
       <div className="mt-12 text-center">
@@ -619,113 +799,190 @@ function TimelineTab({
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="space-y-1">
-        {milestones.map((m, i) => {
-          const done          = m.status === 'complete' || m.status === 'approved'
-          const needsApproval = m.requires_client_approval && !m.client_approved_at && !done
-          const isLast        = i === milestones.length - 1
-          const isApproving   = approvingId === m.id
+    <div className="space-y-3">
+      {/* View toggle */}
+      <div className="flex items-center justify-end gap-1">
+        {(['list', 'gantt'] as ScheduleView[]).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              view === v
+                ? 'bg-brand-600 text-white'
+                : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'
+            }`}
+          >
+            {v === 'list' ? (
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5">
+                <line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="10" y2="12"/>
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5">
+                <line x1="2" y1="4" x2="8" y2="4"/><line x1="2" y1="8" x2="12" y2="8"/><line x1="2" y1="12" x2="6" y2="12"/>
+                <line x1="1" y1="2" x2="1" y2="14"/>
+              </svg>
+            )}
+            <span className="capitalize">{v === 'gantt' ? 'Gantt' : 'List'}</span>
+          </button>
+        ))}
+      </div>
 
-          return (
-            <div key={m.id} className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ring-2 ring-white ${
-                  done                       ? 'bg-green-500 text-white' :
-                  needsApproval              ? 'bg-amber-400 text-white' :
-                  m.status === 'in_progress' ? 'bg-brand-500 text-white' :
-                                               'bg-gray-200 text-gray-400'
-                }`}>
-                  {done ? '✓' : i + 1}
-                </div>
-                {!isLast && <div className="mt-1 w-px flex-1 bg-gray-200"/>}
-              </div>
+      {view === 'gantt' ? (
+        <GanttView
+          milestones={milestones}
+          startDate={startDate}
+          targetCompletion={targetCompletion}
+        />
+      ) : (
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="space-y-1">
+            {milestones.map((m, i) => {
+              const done          = m.status === 'complete' || m.status === 'approved'
+              const needsApproval = m.requires_client_approval && !m.client_approved_at && !done
+              const isLast        = i === milestones.length - 1
+              const isApproving   = approvingId === m.id
 
-              <div className="min-w-0 flex-1 pb-4">
-                <div className="flex items-start justify-between gap-2">
-                  <p className={`text-sm font-medium leading-snug ${done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                    {m.name}
-                  </p>
-                  {done && m.completed_date ? (
-                    <span className="shrink-0 text-xs text-green-600">✓ {fmtDateShort(m.completed_date)}</span>
-                  ) : m.due_date ? (
-                    <span className="shrink-0 text-xs text-gray-400">Due {fmtDateShort(m.due_date)}</span>
-                  ) : null}
-                </div>
+              return (
+                <div key={m.id} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ring-2 ring-white ${
+                      done                       ? 'bg-green-500 text-white' :
+                      needsApproval              ? 'bg-amber-400 text-white' :
+                      m.status === 'in_progress' ? 'bg-brand-500 text-white' :
+                                                   'bg-gray-200 text-gray-400'
+                    }`}>
+                      {done ? (
+                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                          <path d="M2 6l3 3 5-5"/>
+                        </svg>
+                      ) : (i + 1)}
+                    </div>
+                    {!isLast && <div className="mt-1 w-px flex-1 bg-gray-200"/>}
+                  </div>
 
-                {needsApproval && (
-                  <div className="mt-1.5 flex items-center gap-3">
-                    <p className="text-xs font-medium text-amber-600">
-                      {readOnly ? 'Client approval required' : 'Your approval is required'}
-                    </p>
-                    {!readOnly && (
-                      <button
-                        onClick={() => onApprove(m.id)}
-                        disabled={isApproving}
-                        className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
-                      >
-                        {isApproving ? 'Approving…' : 'Approve'}
-                      </button>
+                  <div className="min-w-0 flex-1 pb-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className={`text-sm font-medium leading-snug ${done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                        {m.name}
+                      </p>
+                      {done && m.completed_date ? (
+                        <span className="shrink-0 text-xs text-green-600">✓ {fmtDateShort(m.completed_date)}</span>
+                      ) : m.due_date ? (
+                        <span className="shrink-0 text-xs text-gray-400">Due {fmtDateShort(m.due_date)}</span>
+                      ) : null}
+                    </div>
+
+                    {needsApproval && (
+                      <div className="mt-1.5 flex items-center gap-3">
+                        <p className="text-xs font-medium text-amber-600">
+                          {readOnly ? 'Client approval required' : 'Your approval is required'}
+                        </p>
+                        {!readOnly && (
+                          <button
+                            onClick={() => onApprove(m.id)}
+                            disabled={isApproving}
+                            className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+                          >
+                            {isApproving ? 'Approving…' : 'Approve'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {m.requires_client_approval && m.client_approved_at && !done && (
+                      <p className="mt-0.5 text-xs text-green-600">
+                        ✓ Approved {fmtDateShort(m.client_approved_at)}
+                      </p>
                     )}
                   </div>
-                )}
-                {m.requires_client_approval && m.client_approved_at && !done && (
-                  <p className="mt-0.5 text-xs text-green-600">
-                    ✓ Approved {fmtDateShort(m.client_approved_at)}
-                  </p>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-// ── Invoices ───────────────────────────────────────────────────────────────
+// ── Invoice status helpers ─────────────────────────────────────────────────
+
+// BB invoice_status is a free text column — normalise to lowercase for matching
+const INV_STATUS_LABEL: Record<string, string> = {
+  draft:    'Draft',
+  sent:     'Sent',
+  paid:     'Paid',
+  void:     'Void',
+  overdue:  'Overdue',
+}
+
+const INV_STATUS_COLOR: Record<string, string> = {
+  draft:   'bg-gray-100 text-gray-500',
+  sent:    'bg-blue-100 text-blue-700',
+  paid:    'bg-green-100 text-green-700',
+  void:    'bg-red-100 text-red-600',
+  overdue: 'bg-amber-100 text-amber-700',
+}
+
+function invStatusKey(status: string | null): string {
+  return (status ?? 'draft').toLowerCase()
+}
+
+// ── Invoice row ────────────────────────────────────────────────────────────
 
 function InvoiceRow({ inv }: { inv: PortalInvoice }) {
-  const isPaid = inv.balance_due_cents === 0
+  const statusKey   = invStatusKey(inv.invoice_status)
+  const statusLabel = INV_STATUS_LABEL[statusKey] ?? inv.invoice_status ?? 'Draft'
+  const statusColor = INV_STATUS_COLOR[statusKey] ?? 'bg-gray-100 text-gray-500'
+  const isVoid      = statusKey === 'void'
+  const isPaid      = statusKey === 'paid' || inv.balance_due_cents === 0
+
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base ${isPaid ? 'bg-green-50' : 'bg-amber-50'}`}>
-        {isPaid ? (
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-green-600">
-            <path d="M4 10l4 4 8-8"/>
-          </svg>
-        ) : (
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-amber-600">
-            <circle cx="10" cy="10" r="7.5"/>
-            <path d="M10 6.5V7m0 6v.5M7.75 8.5A2.25 2.25 0 0110 7a2.25 2.25 0 012.25 2.25c0 1.24-1 2.25-2.25 2.25A2.25 2.25 0 007.75 13.75"/>
-          </svg>
-        )}
-      </div>
+    <div className={`flex items-center gap-3 rounded-xl border border-gray-100 px-4 py-3 ${isVoid ? 'opacity-50' : ''}`}>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-900">{inv.invoice_number}</p>
-        <p className="text-xs text-gray-400">{fmtDate(inv.invoice_date)}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className={`text-sm font-semibold text-gray-900 ${isVoid ? 'line-through' : ''}`}>
+            {inv.invoice_number}
+          </p>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusColor}`}>
+            {statusLabel}
+          </span>
+        </div>
+        <p className="text-xs text-gray-400">
+          {fmtDateShort(inv.invoice_date)}
+          {!isPaid && !isVoid && inv.due_date ? ` · Due ${fmtDateShort(inv.due_date)}` : ''}
+          {isPaid && inv.paid_at ? ` · Paid ${fmtDateShort(inv.paid_at)}` : ''}
+        </p>
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-sm font-semibold tabular-nums text-gray-900">{formatMoney(inv.total_cents)}</p>
-        {isPaid ? (
-          <p className="text-xs text-green-600">Paid</p>
-        ) : (
-          <p className="text-xs text-amber-700">Due {fmtDate(inv.due_date)}</p>
+        <p className={`text-sm font-semibold tabular-nums ${isVoid ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+          {formatMoney(inv.total_cents)}
+        </p>
+        {!isPaid && !isVoid && inv.balance_due_cents > 0 && (
+          <p className="text-xs text-amber-700">{formatMoney(inv.balance_due_cents)} due</p>
         )}
       </div>
     </div>
   )
 }
 
+// ── Finances tab ───────────────────────────────────────────────────────────
+
 function FinancesTab({
+  milestones,
   invoices,
   changeOrders,
 }: {
+  milestones:   PortalMilestone[]
   invoices:     PortalInvoice[]
   changeOrders: PortalChangeOrder[]
 }) {
-  const outstanding = invoices.filter((i) => i.balance_due_cents > 0)
-  const paid        = invoices.filter((i) => i.balance_due_cents === 0)
+  // Payment schedule milestones
+  const paymentMilestones  = milestones.filter((m) => m.triggers_invoice)
+  const upcomingPayments   = paymentMilestones.filter((m) => !m.linked_invoice_id)
+  const invoicedPayments   = paymentMilestones.filter((m) => !!m.linked_invoice_id)
+
+  // Invoice lookup by id for linked milestones
+  const invoiceById = new Map(invoices.map((inv) => [inv.id, inv]))
 
   const CO_STATUS_LABEL: Record<string, string> = {
     pending_approval: 'Pending',
@@ -742,29 +999,86 @@ function FinancesTab({
 
   return (
     <div className="space-y-4">
+
+      {/* Payment Schedule */}
+      {paymentMilestones.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 text-base font-semibold text-gray-900">Payment Schedule</h2>
+
+          {upcomingPayments.length > 0 && (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Upcoming</p>
+              <div className="space-y-2">
+                {upcomingPayments.map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900">{m.name}</p>
+                      {m.due_date && (
+                        <p className="text-xs text-gray-400">Due {fmtDateShort(m.due_date)}</p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {m.invoice_amount_cents != null ? (
+                        <p className="text-sm font-semibold tabular-nums text-gray-900">
+                          {formatMoney(m.invoice_amount_cents)}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-gray-400">Amount TBD</p>
+                      )}
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                        Not yet invoiced
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {invoicedPayments.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Invoiced</p>
+              <div className="space-y-2">
+                {invoicedPayments.map((m) => {
+                  const linkedInv = m.linked_invoice_id ? invoiceById.get(m.linked_invoice_id) : undefined
+                  const sKey      = linkedInv ? invStatusKey(linkedInv.invoice_status) : null
+                  return (
+                    <div key={m.id} className="flex items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900">{m.name}</p>
+                        {linkedInv && (
+                          <p className="text-xs text-gray-400">{linkedInv.invoice_number}</p>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        {m.invoice_amount_cents != null && (
+                          <p className="text-sm font-semibold tabular-nums text-gray-900">
+                            {formatMoney(m.invoice_amount_cents)}
+                          </p>
+                        )}
+                        {sKey && (
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${INV_STATUS_COLOR[sKey] ?? 'bg-gray-100 text-gray-500'}`}>
+                            {INV_STATUS_LABEL[sKey] ?? sKey}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Invoices */}
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 className="mb-4 text-base font-semibold text-gray-900">Invoices</h2>
         {invoices.length === 0 ? (
           <p className="text-sm text-gray-400">No invoices yet.</p>
         ) : (
-          <div className="space-y-3">
-            {outstanding.length > 0 && (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Outstanding</p>
-                <div className="space-y-2">
-                  {outstanding.map((inv) => <InvoiceRow key={inv.id} inv={inv}/>)}
-                </div>
-              </div>
-            )}
-            {paid.length > 0 && (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Paid</p>
-                <div className="space-y-2">
-                  {paid.map((inv) => <InvoiceRow key={inv.id} inv={inv}/>)}
-                </div>
-              </div>
-            )}
+          <div className="space-y-2">
+            {invoices.map((inv) => <InvoiceRow key={inv.id} inv={inv}/>)}
           </div>
         )}
       </div>
@@ -963,7 +1277,7 @@ function UpdatesTab({ logs }: { logs: PortalDailyLog[] }) {
   if (logs.length === 0) {
     return (
       <div className="mt-12 text-center">
-        <p className="text-sm text-gray-400">No field updates published yet.</p>
+        <p className="text-sm text-gray-400">No daily logs published yet.</p>
       </div>
     )
   }
@@ -1046,7 +1360,7 @@ function UpdatesTab({ logs }: { logs: PortalDailyLog[] }) {
       )}
 
       {!hasMore && logs.length > LOGS_PER_PAGE && (
-        <p className="text-center text-xs text-gray-400">All {logs.length} updates shown</p>
+        <p className="text-center text-xs text-gray-400">All {logs.length} daily logs shown</p>
       )}
     </div>
   )
@@ -1207,9 +1521,9 @@ export function PortalProjectPage() {
 
   const tabs: TabDef[] = [
     { id: 'overview',   label: 'Overview',   icon: <IconOverview/>,   badge: overviewBadge > 0 ? overviewBadge : undefined },
-    { id: 'timeline',   label: 'Timeline',   icon: <IconTimeline/>   },
+    { id: 'timeline',   label: 'Schedule',    icon: <IconTimeline/>   },
     { id: 'finances',   label: 'Finances',   icon: <IconFinances/>,   badge: financesBadge > 0 ? financesBadge : undefined },
-    { id: 'updates',    label: 'Updates',    icon: <IconUpdates/>    },
+    { id: 'updates',    label: 'Daily Logs', icon: <IconUpdates/>    },
     { id: 'documents',  label: 'Documents',  icon: <IconDocuments/>  },
     ...(!isStaffPreview
       ? [{ id: 'selections' as TabId, label: 'Selections', icon: <IconSelections/>, badge: selectionsBadge > 0 ? selectionsBadge : undefined }]
@@ -1254,6 +1568,8 @@ export function PortalProjectPage() {
       {activeTab === 'timeline' && (
         <TimelineTab
           milestones={milestones}
+          startDate={job?.start_date ?? null}
+          targetCompletion={job?.target_completion ?? null}
           onApprove={(id) => approveMut.mutate(id)}
           approvingId={approveMut.isPending ? (approveMut.variables ?? null) : null}
           readOnly={isStaffPreview}
@@ -1261,7 +1577,7 @@ export function PortalProjectPage() {
       )}
 
       {activeTab === 'finances' && (
-        <FinancesTab invoices={invoices} changeOrders={changeOrders}/>
+        <FinancesTab milestones={milestones} invoices={invoices} changeOrders={changeOrders}/>
       )}
 
       {activeTab === 'updates' && (
