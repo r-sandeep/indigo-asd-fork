@@ -452,8 +452,10 @@ export async function getPortalProjectData(
 export async function getPortalSelections(
   client: SupabaseClient,
   projectId: string,
-  customerId: string,
+  customerId: string | null,
 ): Promise<PortalSelectionCategory[]> {
+  // When customerId is null (e.g. staff preview) skip the client_selections
+  // fetch — categories and options are returned but all selections are null.
   const [categoriesRes, selectionsRes] = await Promise.all([
     client
       .from('selection_categories')
@@ -467,11 +469,13 @@ export async function getPortalSelections(
       .eq('project_id', projectId)
       .eq('is_client_visible', true)
       .order('sequence', { ascending: true }),
-    client
-      .from('client_selections')
-      .select('id, category_id, option_id, custom_description, custom_vendor, custom_price_cents, notes, selected_at, approved_at')
-      .eq('project_id', projectId)
-      .eq('customer_id', customerId),
+    customerId
+      ? client
+          .from('client_selections')
+          .select('id, category_id, option_id, custom_description, custom_vendor, custom_price_cents, notes, selected_at, approved_at')
+          .eq('project_id', projectId)
+          .eq('customer_id', customerId)
+      : Promise.resolve({ data: [], error: null }),
   ])
 
   if (categoriesRes.error)  throw categoriesRes.error

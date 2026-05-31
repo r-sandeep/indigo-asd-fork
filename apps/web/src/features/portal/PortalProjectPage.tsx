@@ -406,10 +406,12 @@ function SelectionCategoryCard({
   category,
   onConfirm,
   isConfirming,
+  readOnly = false,
 }: {
-  category:    PortalSelectionCategory
-  onConfirm:   (optionId: string | null) => void
+  category:     PortalSelectionCategory
+  onConfirm:    (optionId: string | null) => void
   isConfirming: boolean
+  readOnly?:    boolean
 }) {
   const isLocked     = ['approved', 'ordered', 'received', 'installed'].includes(category.status)
   const hasConfirmed = !!category.selection?.option_id || !!category.selection?.custom_description
@@ -528,13 +530,15 @@ function SelectionCategoryCard({
                   )}
                 </p>
               )}
-              <button
-                disabled={!picked || isConfirming}
-                onClick={() => onConfirm(picked)}
-                className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-40"
-              >
-                {isConfirming ? 'Saving…' : 'Confirm Selection'}
-              </button>
+              {!readOnly && (
+                <button
+                  disabled={!picked || isConfirming}
+                  onClick={() => onConfirm(picked)}
+                  className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-40"
+                >
+                  {isConfirming ? 'Saving…' : 'Confirm Selection'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -547,10 +551,12 @@ function SelectionsTab({
   categories,
   project,
   customerId,
+  readOnly = false,
 }: {
   categories: PortalSelectionCategory[]
   project:    { id: string; tenant_id: string }
-  customerId: string
+  customerId: string | null
+  readOnly?:  boolean
 }) {
   const queryClient = useQueryClient()
 
@@ -560,7 +566,7 @@ function SelectionsTab({
         categoryId,
         projectId:  project.id,
         tenantId:   project.tenant_id,
-        customerId,
+        customerId: customerId!,
         optionId,
       }),
     onSuccess: () =>
@@ -594,6 +600,7 @@ function SelectionsTab({
           category={cat}
           onConfirm={(optId) => confirmMut.mutate({ categoryId: cat.id, optionId: optId })}
           isConfirming={confirmMut.isPending && confirmMut.variables?.categoryId === cat.id}
+          readOnly={readOnly}
         />
       ))}
     </div>
@@ -1501,9 +1508,9 @@ export function PortalProjectPage() {
   })
 
   const { data: selections, isLoading: selLoading } = useQuery({
-    queryKey:  ['portal-selections', projectId],
-    queryFn:   () => getPortalSelections(supabase, projectId!, customer!.id),
-    enabled:   !!projectId && !!customer?.id && !isStaffPreview,
+    queryKey:  ['portal-selections', projectId, customer?.id ?? 'staff'],
+    queryFn:   () => getPortalSelections(supabase, projectId!, customer?.id ?? null),
+    enabled:   !!projectId,
     staleTime: 30_000,
   })
 
@@ -1553,10 +1560,7 @@ export function PortalProjectPage() {
     { id: 'finances',   label: 'Finances',   icon: <IconFinances/>,   badge: financesBadge > 0 ? financesBadge : undefined },
     { id: 'updates',    label: 'Daily Logs', icon: <IconUpdates/>    },
     { id: 'documents',  label: 'Documents',  icon: <IconDocuments/>  },
-    ...(!isStaffPreview
-      ? [{ id: 'selections' as TabId, label: 'Selections', icon: <IconSelections/>, badge: selectionsBadge > 0 ? selectionsBadge : undefined }]
-      : []
-    ),
+    { id: 'selections' as TabId, label: 'Selections', icon: <IconSelections/>, badge: !isStaffPreview && selectionsBadge > 0 ? selectionsBadge : undefined },
   ]
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1616,7 +1620,7 @@ export function PortalProjectPage() {
         <DocumentsTab documents={documents}/>
       )}
 
-      {activeTab === 'selections' && !isStaffPreview && (
+      {activeTab === 'selections' && (
         selLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-2xl"/>)}
@@ -1625,7 +1629,8 @@ export function PortalProjectPage() {
           <SelectionsTab
             categories={selections ?? []}
             project={project}
-            customerId={customer!.id}
+            customerId={customer?.id ?? null}
+            readOnly={isStaffPreview}
           />
         )
       )}
