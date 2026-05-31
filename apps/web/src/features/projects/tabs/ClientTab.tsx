@@ -150,13 +150,24 @@ function PortalUserRow({
   user,
   onRemove,
   isRemoving,
+  onResend,
+  isResending,
 }: {
-  user:       CustomerPortalUser
-  onRemove:   () => void
-  isRemoving: boolean
+  user:        CustomerPortalUser
+  onRemove:    () => void
+  isRemoving:  boolean
+  onResend:    () => void
+  isResending: boolean
 }) {
   const [confirming, setConfirming] = useState(false)
+  const [resentOk,   setResentOk]   = useState(false)
   const isLinked = !!user.user_id
+
+  async function handleResend() {
+    await onResend()
+    setResentOk(true)
+    setTimeout(() => setResentOk(false), 4000)
+  }
 
   return (
     <div className="flex items-center gap-3 px-5 py-3">
@@ -183,31 +194,50 @@ function PortalUserRow({
         </div>
       </div>
 
-      {/* Remove — two-step confirm */}
-      {confirming ? (
-        <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
+        {/* Resend button — only shown for pending (not yet signed in) users */}
+        {!isLinked && !confirming && (
+          resentOk ? (
+            <span className="rounded-lg bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">
+              Sent ✓
+            </span>
+          ) : (
+            <button
+              onClick={handleResend}
+              disabled={isResending}
+              className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              {isResending ? 'Sending…' : 'Resend'}
+            </button>
+          )
+        )}
+
+        {/* Remove — two-step confirm */}
+        {confirming ? (
+          <>
+            <button
+              onClick={() => { setConfirming(false); onRemove() }}
+              disabled={isRemoving}
+              className="rounded-lg bg-red-500 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+            >
+              {isRemoving ? 'Removing…' : 'Confirm remove'}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
           <button
-            onClick={() => { setConfirming(false); onRemove() }}
-            disabled={isRemoving}
-            className="rounded-lg bg-red-500 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+            onClick={() => setConfirming(true)}
+            className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
           >
-            {isRemoving ? 'Removing…' : 'Confirm remove'}
+            Remove
           </button>
-          <button
-            onClick={() => setConfirming(false)}
-            className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setConfirming(true)}
-          className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-        >
-          Remove
-        </button>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -215,13 +245,17 @@ function PortalUserRow({
 function AddPortalUserForm({
   customerId,
   tenantId,
-  existingEmails,
+  primaryEmail,
+  linkedEmails,
   onSuccess,
 }: {
-  customerId:     string
-  tenantId:       string
-  existingEmails: string[]
-  onSuccess:      () => void
+  customerId:   string
+  tenantId:     string
+  /** Primary customer email — always blocked */
+  primaryEmail: string
+  /** Emails of secondary users who have already completed sign-up (user_id set) */
+  linkedEmails: string[]
+  onSuccess:    () => void
 }) {
   const [email,   setEmail]   = useState('')
   const [label,   setLabel]   = useState('')
@@ -236,8 +270,11 @@ function AddPortalUserForm({
 
     const trimmedEmail = email.trim().toLowerCase()
     if (!trimmedEmail.includes('@')) { setErr('Enter a valid email address.'); return }
-    if (existingEmails.map((x) => x.toLowerCase()).includes(trimmedEmail)) {
-      setErr('That email already has portal access.'); return
+    if (trimmedEmail === primaryEmail.toLowerCase()) {
+      setErr('That email is already the primary contact for this customer.'); return
+    }
+    if (linkedEmails.map((x) => x.toLowerCase()).includes(trimmedEmail)) {
+      setErr('That contact has already signed in and has active portal access.'); return
     }
 
     setLoading(true)
@@ -311,6 +348,7 @@ function SecondaryPortalUsersCard({
   tenantId: string
 }) {
   const queryClient = useQueryClient()
+  const [resendingId, setResendingId] = useState<string | null>(null)
 
   const { data: portalUsers = [], isLoading } = useQuery({
     queryKey:  ['customer-portal-users', customer.id],
@@ -323,11 +361,19 @@ function SecondaryPortalUsersCard({
     onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['customer-portal-users', customer.id] }),
   })
 
-  // Emails that already have access (primary + secondary) — used for duplicate check
-  const existingEmails = [
-    customer.email,
-    ...portalUsers.map((u) => u.email),
-  ]
+  async function handleResend(u: CustomerPortalUser) {
+    setResendingId(u.id)
+    try {
+      await callPortalInvite(customer.id, tenantId, u.email, u.label)
+      queryClient.invalidateQueries({ queryKey: ['customer-portal-users', customer.id] })
+    } finally {
+      setResendingId(null)
+    }
+  }
+
+  // Only block the form for emails that are fully linked (user_id set).
+  // Pending users (user_id null) can be re-invited via the form or the Resend button.
+  const linkedEmails = portalUsers.filter((u) => !!u.user_id).map((u) => u.email)
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
@@ -355,6 +401,8 @@ function SecondaryPortalUsersCard({
               user={u}
               onRemove={() => removeMut.mutate(u.id)}
               isRemoving={removeMut.isPending && removeMut.variables === u.id}
+              onResend={() => handleResend(u)}
+              isResending={resendingId === u.id}
             />
           ))}
         </div>
@@ -363,7 +411,8 @@ function SecondaryPortalUsersCard({
       <AddPortalUserForm
         customerId={customer.id}
         tenantId={tenantId}
-        existingEmails={existingEmails}
+        primaryEmail={customer.email}
+        linkedEmails={linkedEmails}
         onSuccess={() => queryClient.invalidateQueries({ queryKey: ['customer-portal-users', customer.id] })}
       />
     </div>

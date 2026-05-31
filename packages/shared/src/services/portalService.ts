@@ -341,19 +341,11 @@ export async function getStaffPortalProjects(
 
 export async function getPortalProjects(
   client: SupabaseClient,
-  customerId: string,
+  _customerId: string,
 ): Promise<PortalProject[]> {
-  // Get job IDs for this customer
-  const { data: jobs, error: jobsError } = await client
-    .from('jobs')
-    .select('id')
-    .eq('customer_id', customerId)
-
-  if (jobsError) throw jobsError
-  if (!jobs || jobs.length === 0) return []
-
-  const jobIds = (jobs as { id: string }[]).map((j) => j.id)
-
+  // Query projects directly — the "clients view their project" RLS policy
+  // (is_client_on_job) restricts rows to this customer's projects without
+  // requiring a separate direct read of the jobs table.
   const { data, error } = await client
     .from('projects')
     .select(`
@@ -366,7 +358,6 @@ export async function getPortalProjects(
         start_date, target_completion, actual_completion
       )
     `)
-    .in('job_id', jobIds)
     .order('created_at', { ascending: false })
 
   if (error) throw error
