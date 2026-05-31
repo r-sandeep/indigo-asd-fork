@@ -6,6 +6,9 @@
 [build.environment]
   NODE_VERSION = "20"
   PNPM_VERSION = "9"
+  # SUPABASE_URL is the public project URL — intentionally bundled in client JS
+  # alongside the anon key. It is not a secret; omit it from Netlify's scanner.
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
 
 [[redirects]]
   from   = "/*"
