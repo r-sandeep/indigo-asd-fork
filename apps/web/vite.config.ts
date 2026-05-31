@@ -62,7 +62,6 @@ export default defineConfig(({ mode }) => {
           )
         },
       },
-    ],
 
       // ── Dev proxy for portal-invite Netlify function ──────────────────────
       // Mirrors functions/portal-invite.ts for local dev without netlify dev.
@@ -171,7 +170,7 @@ export default defineConfig(({ mode }) => {
           )
         },
       },
-    ],
+    ],    // end plugins
 
     resolve: {
       alias: {

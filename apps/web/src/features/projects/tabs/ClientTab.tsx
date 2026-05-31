@@ -471,7 +471,10 @@ function MilestoneVisibilitySection({
 
 export function ClientTab() {
   const { project } = useOutletContext<{ project: ProjectRow | undefined; isLoading: boolean }>()
-  const { activeTenantId } = useAuth()
+  const { activeTenantId, tenantMemberships } = useAuth()
+
+  const activeRole = tenantMemberships.find((m) => m.tenant_id === activeTenantId)?.role ?? null
+  const canManagePortal = ['project_manager', 'admin', 'owner'].includes(activeRole ?? '')
 
   const jobId     = project?.job_id
   const projectId = project?.id
@@ -540,8 +543,8 @@ export function ClientTab() {
       {/* Primary portal access */}
       <PrimaryPortalCard customer={customer}/>
 
-      {/* Secondary portal contacts */}
-      {activeTenantId && (
+      {/* Secondary portal contacts — PM+ only */}
+      {canManagePortal && activeTenantId && (
         <SecondaryPortalUsersCard customer={customer} tenantId={activeTenantId}/>
       )}
 
