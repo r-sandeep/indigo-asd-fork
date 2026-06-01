@@ -23,6 +23,7 @@ import {
   addProjectMember,
   removeProjectMember,
   getTenantEmployees,
+  logSessionMileage,
 } from '@indigo/shared'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
@@ -328,17 +329,24 @@ export function ClockTab() {
   })
 
   const clockOutMut = useMutation({
-    mutationFn: () => {
+    mutationFn: async ({ miles }: { miles: number | null }) => {
       if (!mySession) throw new Error('No active session')
-      return clockOut(
+      const sessionId = mySession.id
+      const result = await clockOut(
         supabase,
-        mySession.id,
+        sessionId,
         geo.lat ?? 0,
         geo.lng ?? 0,
         geo.accuracyM ?? 999,
       )
+      if (miles != null && miles > 0) {
+        await logSessionMileage(supabase, sessionId, miles)
+      }
+      return result
     },
     onSuccess: (result) => {
+      setShowMileageStep(false)
+      setMileageInput('')
       qc.invalidateQueries({ queryKey: ['active-session', projectId, userId] })
       qc.invalidateQueries({ queryKey: ['active-sessions', projectId] })
       qc.invalidateQueries({ queryKey: ['work-sessions', projectId] })
@@ -479,6 +487,10 @@ export function ClockTab() {
     },
     onError: (err: Error) => toast.error(err.message),
   })
+
+  // ── Mileage step (shown between "Clock Out" click and actual clock-out) ──
+  const [showMileageStep, setShowMileageStep] = useState(false)
+  const [mileageInput,    setMileageInput]    = useState('')
 
   // ── PM: Project team management ───────────────────────────────────────────
   const [showAddMember, setShowAddMember]   = useState(false)
@@ -671,36 +683,79 @@ export function ClockTab() {
                   </div>
                 )}
 
-                {/* Action buttons */}
-                <div className="flex gap-3">
-                  {/* Break toggle */}
-                  {isOnBreak ? (
-                    <button
-                      onClick={() => endBreakMut.mutate()}
-                      disabled={endBreakMut.isPending}
-                      className="flex-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
-                    >
-                      {endBreakMut.isPending ? 'Ending…' : 'End Break'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => startBreakMut.mutate()}
-                      disabled={startBreakMut.isPending}
-                      className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 active:scale-[0.98] transition-all disabled:opacity-50"
-                    >
-                      {startBreakMut.isPending ? 'Starting…' : 'Start Break'}
-                    </button>
-                  )}
+                {/* Mileage step — shown when user clicks Clock Out */}
+                {showMileageStep ? (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-4 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Miles driven today?</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Enter round-trip mileage for reimbursement tracking. Leave blank to skip.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={mileageInput}
+                        onChange={(e) => setMileageInput(e.target.value)}
+                        placeholder="0.0"
+                        min="0"
+                        step="0.1"
+                        autoFocus
+                        className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                      />
+                      <span className="text-sm text-gray-500">miles</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => clockOutMut.mutate({ miles: null })}
+                        disabled={clockOutMut.isPending}
+                        className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 active:scale-[0.98] transition-all disabled:opacity-50"
+                      >
+                        Skip
+                      </button>
+                      <button
+                        onClick={() => {
+                          const miles = parseFloat(mileageInput)
+                          clockOutMut.mutate({ miles: !isNaN(miles) && miles > 0 ? miles : null })
+                        }}
+                        disabled={clockOutMut.isPending}
+                        className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 active:scale-[0.98] transition-all disabled:opacity-50"
+                      >
+                        {clockOutMut.isPending ? 'Clocking out…' : 'Clock Out'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Normal action buttons ─────────────────────────── */
+                  <div className="flex gap-3">
+                    {/* Break toggle */}
+                    {isOnBreak ? (
+                      <button
+                        onClick={() => endBreakMut.mutate()}
+                        disabled={endBreakMut.isPending}
+                        className="flex-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
+                      >
+                        {endBreakMut.isPending ? 'Ending…' : 'End Break'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => startBreakMut.mutate()}
+                        disabled={startBreakMut.isPending}
+                        className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 active:scale-[0.98] transition-all disabled:opacity-50"
+                      >
+                        {startBreakMut.isPending ? 'Starting…' : 'Start Break'}
+                      </button>
+                    )}
 
-                  {/* Clock out */}
-                  <button
-                    onClick={() => clockOutMut.mutate()}
-                    disabled={clockOutMut.isPending}
-                    className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 active:scale-[0.98] transition-all disabled:opacity-50"
-                  >
-                    {clockOutMut.isPending ? 'Clocking out…' : 'Clock Out'}
-                  </button>
-                </div>
+                    {/* Clock out — opens mileage step */}
+                    <button
+                      onClick={() => setShowMileageStep(true)}
+                      className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 active:scale-[0.98] transition-all"
+                    >
+                      Clock Out
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1198,6 +1253,11 @@ function SessionHistoryRow({ session }: { session: WorkSession }) {
         {session.ot_1_5_hours != null && session.ot_1_5_hours > 0 && (
           <p className="text-xs text-amber-600 mt-0.5">
             +{formatHours(session.ot_1_5_hours)} OT
+          </p>
+        )}
+        {session.mileage_miles != null && (
+          <p className="text-xs text-blue-600 mt-0.5">
+            {session.mileage_miles} mi
           </p>
         )}
         {session.labor_cost_cents != null && (

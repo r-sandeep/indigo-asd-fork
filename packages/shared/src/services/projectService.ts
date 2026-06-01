@@ -1560,6 +1560,7 @@ export interface WorkSession {
   status: SessionStatus
   time_entry_id: string | null
   notes: string | null
+  mileage_miles: number | null
   created_at: string
   // Optional joined user data (when fetching "who's on site")
   user?: { first_name: string; last_name: string; avatar_url: string | null }
@@ -1672,6 +1673,22 @@ export async function clockOut(
   })
   if (error) throw error
   return data as ClockOutResult
+}
+
+/**
+ * Records mileage on a completed work_session.
+ * Called immediately after clock_out succeeds, before the query is invalidated.
+ */
+export async function logSessionMileage(
+  client: SupabaseClient,
+  sessionId: string,
+  miles: number,
+): Promise<void> {
+  const { error } = await client
+    .from('work_sessions')
+    .update({ mileage_miles: miles } as unknown as never)
+    .eq('id', sessionId)
+  if (error) throw error
 }
 
 /** Starts a break on the active session (sets status → 'on_break'). */
