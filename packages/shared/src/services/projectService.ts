@@ -407,13 +407,15 @@ export async function getInvoiceTriggerMilestones(
   client: SupabaseClient,
   projectId: string,
 ): Promise<InvoiceTriggerMilestone[]> {
+  // Step 1: fetch the milestones — no FK join, so this works even when the
+  // milestones.linked_invoice_id → invoices FK constraint is missing.
+  // (The FK was absent due to a migration bug fixed in 035.)
   const { data, error } = await client
     .from('milestones')
     .select(`
       id, project_id, phase_id, name, status,
       due_date, completed_date, sequence, invoice_amount_cents,
-      linked_invoice_id,
-      linked_invoice:invoices!linked_invoice_id ( id, invoice_number, invoice_status )
+      linked_invoice_id
     `)
     .eq('project_id', projectId)
     .eq('triggers_invoice', true)
@@ -422,17 +424,31 @@ export async function getInvoiceTriggerMilestones(
 
   if (error) throw error
 
-  type Raw = {
+  const rows = (data ?? []) as {
     id: string; project_id: string; phase_id: string | null
     name: string; status: string; due_date: string | null
     completed_date: string | null; sequence: number
     invoice_amount_cents: number | null
     linked_invoice_id: string | null
-    linked_invoice: { id: string; invoice_number: string; invoice_status: string } | null
+  }[]
+
+  // Step 2: batch-fetch invoice headers for any milestones that are linked.
+  const linkedIds = [...new Set(rows.map((r) => r.linked_invoice_id).filter(Boolean))] as string[]
+
+  const invoiceMap: Record<string, { id: string; invoice_number: string; invoice_status: string }> = {}
+  if (linkedIds.length > 0) {
+    const { data: invData } = await client
+      .from('invoices')
+      .select('id, invoice_number, invoice_status')
+      .in('id', linkedIds)
+    for (const inv of invData ?? []) {
+      invoiceMap[(inv as { id: string; invoice_number: string; invoice_status: string }).id] =
+        inv as { id: string; invoice_number: string; invoice_status: string }
+    }
   }
 
-  return ((data ?? []) as unknown as Raw[]).map((row) => {
-    const inv = row.linked_invoice ?? null
+  return rows.map((row) => {
+    const inv = row.linked_invoice_id ? (invoiceMap[row.linked_invoice_id] ?? null) : null
     return {
       id:                   row.id,
       project_id:           row.project_id,
@@ -444,7 +460,7 @@ export async function getInvoiceTriggerMilestones(
       sequence:             row.sequence,
       invoice_amount_cents: row.invoice_amount_cents,
       linked_invoice_id:    row.linked_invoice_id,
-      invoice_id:           inv?.id            ?? null,
+      invoice_id:           inv?.id             ?? null,
       invoice_number:       inv?.invoice_number ?? null,
       invoice_status:       inv?.invoice_status ?? null,
     }
