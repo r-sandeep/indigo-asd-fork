@@ -608,6 +608,11 @@ export interface ProjectSubmittal {
 export interface ProjectDailyLog {
   id: string
   date: string
+  /** Distinguishes client-facing summaries from internal worker reports. */
+  log_type: 'summary' | 'field_associate' | 'subcontractor'
+  author_id: string
+  /** Joined from user_profiles — present for internal reports shown to PM. */
+  author_profile: { first_name: string | null; last_name: string | null } | null
   weather: string | null
   temperature_f: number | null
   crew_count: number | null
@@ -695,7 +700,7 @@ export async function getProjectFieldData(
       .order('created_at', { ascending: false }),
     client
       .from('daily_logs')
-      .select('id, date, weather, temperature_f, crew_count, hours_worked, work_performed, materials_delivered, equipment_used, issues_or_delays, is_client_visible, published_at, created_at')
+      .select('id, date, log_type, author_id, author_profile:user_profiles!daily_logs_author_id_fkey(first_name,last_name), weather, temperature_f, crew_count, hours_worked, work_performed, materials_delivered, equipment_used, issues_or_delays, is_client_visible, published_at, created_at')
       .eq('project_id', projectId)
       .eq('tenant_id', tenantId)
       .order('date', { ascending: false }),
@@ -706,11 +711,16 @@ export async function getProjectFieldData(
   if (submittalsRes.error) throw submittalsRes.error
   if (logsRes.error) throw logsRes.error
 
+  const allLogs = (logsRes.data ?? []) as ProjectDailyLog[]
+
   return {
-    rfis:       (rfisRes.data       ?? []) as ProjectRfi[],
-    punchItems: (punchRes.data      ?? []) as ProjectPunchItem[],
-    submittals: (submittalsRes.data ?? []) as ProjectSubmittal[],
-    dailyLogs:  (logsRes.data       ?? []) as ProjectDailyLog[],
+    rfis:            (rfisRes.data       ?? []) as ProjectRfi[],
+    punchItems:      (punchRes.data      ?? []) as ProjectPunchItem[],
+    submittals:      (submittalsRes.data ?? []) as ProjectSubmittal[],
+    /** Client-facing PM summaries (log_type = 'summary') */
+    summaryLogs:     allLogs.filter((l) => l.log_type === 'summary'),
+    /** Internal field-associate and subcontractor reports */
+    internalReports: allLogs.filter((l) => l.log_type !== 'summary'),
   }
 }
 
@@ -1380,6 +1390,8 @@ export async function updateDailyLogPhotoCaption(
 
 export interface CreateDailyLogInput {
   date: string
+  /** Defaults to 'summary'. Pass 'field_associate' or 'subcontractor' for internal reports. */
+  log_type?: 'summary' | 'field_associate' | 'subcontractor'
   weather?: string | null
   temperature_f?: number | null
   crew_count?: number | null
@@ -1405,6 +1417,7 @@ export async function createDailyLog(
       tenant_id:           tenantId,
       project_id:          projectId,
       author_id:           userId,
+      log_type:            input.log_type ?? 'summary',
       date:                input.date,
       weather:             input.weather              ?? null,
       temperature_f:       input.temperature_f        ?? null,
@@ -1471,6 +1484,179 @@ export async function setDailyLogClientVisible(
     .update({ is_client_visible: isVisible } as unknown as never)
     .eq('id', logId)
   if (error) throw error
+}
+
+// ── Worker daily report helpers (migration 036) ────────────────────────────
+//
+// Field associates and subcontractors submit internal reports (not client-visible).
+// PM+ later creates a summary log from these, optionally selecting photos to
+// include in the client-facing log.
+
+/**
+ * Creates or updates a field-associate / subcontractor internal report.
+ * Idempotent: if a report already exists for (project, date, author), updates
+ * the work_performed text.  Returns the log id in both cases.
+ */
+export async function upsertWorkerDailyReport(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  userId: string,
+  logType: 'field_associate' | 'subcontractor',
+  date: string,
+  workPerformed: string,
+): Promise<{ id: string }> {
+  // Check for an existing report from this worker on this date
+  const { data: existing } = await client
+    .from('daily_logs')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('date', date)
+    .eq('author_id', userId)
+    .in('log_type', ['field_associate', 'subcontractor'])
+    .maybeSingle() as unknown as { data: { id: string } | null }
+
+  if (existing) {
+    const { error } = await client
+      .from('daily_logs')
+      .update({ work_performed: workPerformed } as unknown as never)
+      .eq('id', existing.id)
+    if (error) throw error
+    return { id: existing.id }
+  }
+
+  const { data, error } = await client
+    .from('daily_logs')
+    .insert({
+      tenant_id:       tenantId,
+      project_id:      projectId,
+      author_id:       userId,
+      log_type:        logType,
+      date,
+      work_performed:  workPerformed,
+      is_client_visible: false,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data as { id: string }
+}
+
+/** Photo info returned by getWorkerReportPhotosForDate, used by PM photo picker. */
+export interface WorkerReportPhotoInfo {
+  id: string           // daily_log_photos.id
+  logId: string        // which internal report this came from
+  documentId: string   // document.id — this is what gets linked to the summary
+  signedUrl: string
+  caption: string | null
+}
+
+/**
+ * Fetches all photos from the given internal-report log IDs and generates
+ * short-lived signed URLs for display in the PM photo picker.
+ */
+export async function getWorkerReportPhotos(
+  client: SupabaseClient,
+  logIds: string[],
+): Promise<WorkerReportPhotoInfo[]> {
+  if (logIds.length === 0) return []
+
+  const { data, error } = await client
+    .from('daily_log_photos')
+    .select('id, daily_log_id, document_id, caption, documents!daily_log_photos_document_id_fkey(storage_path, storage_bucket)')
+    .in('daily_log_id', logIds)
+    .order('sequence', { ascending: true })
+  if (error) throw error
+  if (!data?.length) return []
+
+  const results: WorkerReportPhotoInfo[] = []
+  for (const row of data as Array<{
+    id: string
+    daily_log_id: string
+    document_id: string
+    caption: string | null
+    documents: { storage_path: string; storage_bucket: string } | null
+  }>) {
+    if (!row.documents) continue
+    const { data: signed, error: signErr } = await client.storage
+      .from(row.documents.storage_bucket)
+      .createSignedUrl(row.documents.storage_path, 3600)
+    if (signErr) continue
+    results.push({
+      id:         row.id,
+      logId:      row.daily_log_id,
+      documentId: row.document_id,
+      signedUrl:  signed!.signedUrl,
+      caption:    row.caption,
+    })
+  }
+  return results
+}
+
+export interface CreateSummaryLogInput {
+  date: string
+  weather?: string | null
+  temperature_f?: number | null
+  crew_count?: number | null
+  hours_worked?: number | null
+  work_performed: string
+  materials_delivered?: string | null
+  equipment_used?: string | null
+  is_client_visible?: boolean
+  publish?: boolean
+  /** document_id values from worker-report photos to include in the summary */
+  selectedDocumentIds?: string[]
+}
+
+/**
+ * Creates a client-facing summary daily log (log_type='summary').
+ * Optionally links photos from worker reports to the new log.
+ */
+export async function createSummaryLog(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  userId: string,
+  input: CreateSummaryLogInput,
+): Promise<{ id: string }> {
+  const { data, error } = await client
+    .from('daily_logs')
+    .insert({
+      tenant_id:           tenantId,
+      project_id:          projectId,
+      author_id:           userId,
+      log_type:            'summary',
+      date:                input.date,
+      weather:             input.weather             ?? null,
+      temperature_f:       input.temperature_f       ?? null,
+      crew_count:          input.crew_count          ?? null,
+      hours_worked:        input.hours_worked        ?? null,
+      work_performed:      input.work_performed,
+      materials_delivered: input.materials_delivered ?? null,
+      equipment_used:      input.equipment_used      ?? null,
+      is_client_visible:   input.is_client_visible   ?? false,
+      published_at:        input.publish ? new Date().toISOString() : null,
+    } as unknown as never)
+    .select('id')
+    .single()
+  if (error) throw error
+  const logId = (data as { id: string }).id
+
+  // Link selected photos from worker reports to this summary log
+  if (input.selectedDocumentIds && input.selectedDocumentIds.length > 0) {
+    const photoRows = input.selectedDocumentIds.map((docId, i) => ({
+      daily_log_id:      logId,
+      document_id:       docId,
+      sequence:          i,
+      is_client_visible: true,
+    }))
+    const { error: photoErr } = await client
+      .from('daily_log_photos')
+      .insert(photoRows as unknown as never)
+    if (photoErr) throw photoErr
+  }
+
+  return { id: logId }
 }
 
 // ── Draw schedule mutations ────────────────────────────────────────────────

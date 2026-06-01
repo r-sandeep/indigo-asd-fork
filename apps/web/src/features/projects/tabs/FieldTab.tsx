@@ -10,6 +10,8 @@ import type {
   DailyLogPhoto,
   CreateDailyLogInput,
   UpdateDailyLogInput,
+  WorkerReportPhotoInfo,
+  CreateSummaryLogInput,
 } from '@indigo/shared'
 import {
   createDailyLog,
@@ -20,6 +22,9 @@ import {
   uploadDailyLogPhoto,
   deleteDailyLogPhoto,
   updateDailyLogPhotoCaption,
+  upsertWorkerDailyReport,
+  getWorkerReportPhotos,
+  createSummaryLog,
 } from '@indigo/shared'
 import { useProjectFieldData } from '../useProject'
 import { useAuth } from '@/hooks/useAuth'
@@ -47,6 +52,10 @@ function isOverdue(dueDate: string | null): boolean {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
+}
+
+function fmtAuthorName(profile: { first_name: string | null; last_name: string | null } | null | undefined): string {
+  return [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'Worker'
 }
 
 // ── Status configs ─────────────────────────────────────────────────────────
@@ -131,26 +140,26 @@ function Toggle({
 // ── Summary stats ──────────────────────────────────────────────────────────
 
 function FieldSummary({
-  rfis, punchItems, submittals, dailyLogs,
+  rfis, punchItems, submittals, summaryLogs,
 }: {
   rfis: ProjectRfi[]
   punchItems: ProjectPunchItem[]
   submittals: ProjectSubmittal[]
-  dailyLogs: ProjectDailyLog[]
+  summaryLogs: ProjectDailyLog[]
 }) {
   const openRfis      = rfis.filter((r) => !['closed', 'void'].includes(r.status)).length
   const openPunch     = punchItems.filter((p) => !['closed', 'void'].includes(p.status)).length
   const pendingSubs   = submittals.filter((s) => !['approved', 'approved_as_noted', 'void'].includes(s.status)).length
   const overdueRfis   = rfis.filter((r) => isOverdue(r.due_date) && !['closed', 'void', 'answered'].includes(r.status)).length
-  const publishedLogs = dailyLogs.filter((l) => l.published_at).length
+  const publishedLogs = summaryLogs.filter((l) => l.published_at).length
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {[
-        { label: 'Daily Logs',         value: dailyLogs.length, warn: false, sub: publishedLogs > 0 ? `${publishedLogs} published` : undefined },
-        { label: 'Open RFIs',          value: openRfis,         warn: overdueRfis > 0, sub: overdueRfis > 0 ? `${overdueRfis} overdue` : undefined },
-        { label: 'Punch Items',        value: openPunch,        warn: openPunch > 0 },
-        { label: 'Pending Submittals', value: pendingSubs,      warn: false },
+        { label: 'Daily Logs',         value: summaryLogs.length, warn: false, sub: publishedLogs > 0 ? `${publishedLogs} published` : undefined },
+        { label: 'Open RFIs',          value: openRfis,           warn: overdueRfis > 0, sub: overdueRfis > 0 ? `${overdueRfis} overdue` : undefined },
+        { label: 'Punch Items',        value: openPunch,          warn: openPunch > 0 },
+        { label: 'Pending Submittals', value: pendingSubs,        warn: false },
       ].map((item) => (
         <div key={item.label} className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
           <p className="text-xs font-medium text-gray-500">{item.label}</p>
@@ -262,7 +271,7 @@ function DailyLogModal({ mode, log, onSubmit, onClose, isLoading }: DailyLogModa
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-base font-semibold text-gray-900">
-            {mode === 'create' ? 'New Daily Log' : `Edit Log — ${fmtDate(log?.date)}`}
+            {mode === 'create' ? 'New Summary' : `Edit Log — ${fmtDate(log?.date)}`}
           </h2>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
             ✕
@@ -493,7 +502,7 @@ function DailyLogModal({ mode, log, onSubmit, onClose, isLoading }: DailyLogModa
             {isLoading
               ? 'Saving…'
               : mode === 'create'
-                ? stagedPhotos.length > 0 ? `Create Log + ${stagedPhotos.length} Photo${stagedPhotos.length > 1 ? 's' : ''}` : 'Create Log'
+                ? stagedPhotos.length > 0 ? `Create Summary + ${stagedPhotos.length} Photo${stagedPhotos.length > 1 ? 's' : ''}` : 'Create Summary'
                 : stagedPhotos.length > 0 ? `Save + ${stagedPhotos.length} Photo${stagedPhotos.length > 1 ? 's' : ''}` : 'Save Changes'
             }
           </button>
@@ -775,20 +784,752 @@ function LogPhotoGallery({
   )
 }
 
-// ── Daily Logs section ─────────────────────────────────────────────────────
+// ── Worker Report Modal ────────────────────────────────────────────────────
 
-interface DailyLogsSectionProps {
-  logs: ProjectDailyLog[]
+interface WorkerReportModalProps {
   projectId: string
   tenantId: string
   userId: string
+  role: string | null
+  onSuccess: () => void
+  onClose: () => void
 }
 
-function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectionProps) {
+function WorkerReportModal({ projectId, tenantId, userId, role, onSuccess, onClose }: WorkerReportModalProps) {
+  const toast = useToast()
+  const [workPerformed, setWorkPerformed] = useState('')
+  const [stagedPhotos, setStagedPhotos] = useState<File[]>([])
+  const [previews, setPreviews] = useState<string[]>([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    return () => previews.forEach((url) => URL.revokeObjectURL(url))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function addFiles(files: FileList | null) {
+    if (!files) return
+    const valid = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') && f.size <= MAX_FILE_SIZE_MB * 1024 * 1024,
+    )
+    if (valid.length === 0) return
+    const newPreviews = valid.map((f) => URL.createObjectURL(f))
+    setStagedPhotos((prev) => [...prev, ...valid])
+    setPreviews((prev) => [...prev, ...newPreviews])
+    if (photoInputRef.current) photoInputRef.current.value = ''
+  }
+
+  function removeStaged(idx: number) {
+    URL.revokeObjectURL(previews[idx])
+    setStagedPhotos((prev) => prev.filter((_, i) => i !== idx))
+    setPreviews((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  // Determine log_type from role
+  const logType: 'field_associate' | 'subcontractor' =
+    role === 'subcontractor' ? 'subcontractor' : 'field_associate'
+
+  const canSubmit = workPerformed.trim().length > 0 && stagedPhotos.length > 0
+
+  async function handleSubmit() {
+    if (!canSubmit) return
+    setIsSubmitting(true)
+    try {
+      const { id: logId } = await upsertWorkerDailyReport(
+        supabase, tenantId, projectId, userId, logType, todayIso(), workPerformed.trim(),
+      )
+      await Promise.all(
+        stagedPhotos.map((f) => uploadDailyLogPhoto(supabase, tenantId, projectId, logId, userId, f)),
+      )
+      toast.success('Report submitted')
+      onSuccess()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900">Submit Field Report</h2>
+          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="max-h-[70vh] overflow-y-auto px-6 py-5 space-y-4">
+          {/* Work performed */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              What did you work on today? *
+            </label>
+            <textarea
+              rows={4}
+              placeholder="Describe the work you completed today…"
+              value={workPerformed}
+              onChange={(e) => setWorkPerformed(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+            />
+          </div>
+
+          {/* Photos — at least 1 required */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-700">
+                Photos * {stagedPhotos.length === 0 ? <span className="text-red-500">(at least 1 required)</span> : `(${stagedPhotos.length} selected)`}
+              </label>
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200"
+              >
+                <PlusIcon className="h-3 w-3" /> Add
+              </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => addFiles(e.target.files)}
+              />
+            </div>
+
+            {previews.length > 0 ? (
+              <div className="grid grid-cols-4 gap-2">
+                {previews.map((url, i) => (
+                  <div key={i} className="group relative aspect-square">
+                    <img
+                      src={url}
+                      alt={`Photo ${i + 1}`}
+                      className="h-full w-full rounded-lg object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeStaged(i)}
+                      className="absolute right-0.5 top-0.5 hidden rounded-full bg-black/60 p-0.5 text-[10px] text-white hover:bg-red-600 group-hover:block"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="aspect-square rounded-lg border-2 border-dashed border-gray-200 text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors flex items-center justify-center"
+                >
+                  <PlusIcon className="h-5 w-5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-red-200 py-5 text-xs text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add at least one site photo
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 border-t border-gray-100 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canSubmit || isSubmitting}
+            onClick={handleSubmit}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {isSubmitting ? 'Submitting…' : 'Submit Report'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Summary Builder Modal ──────────────────────────────────────────────────
+
+interface SummaryBuilderModalProps {
+  projectId: string
+  tenantId: string
+  userId: string
+  date: string
+  reports: ProjectDailyLog[]
+  onClose: () => void
+  onSuccess: () => void
+}
+
+function SummaryBuilderModal({
+  projectId,
+  tenantId,
+  userId,
+  date,
+  reports,
+  onClose,
+  onSuccess,
+}: SummaryBuilderModalProps) {
+  const toast = useToast()
+  const qc = useQueryClient()
+
+  const [summaryText, setSummaryText] = useState('')
+  const [weather, setWeather] = useState('')
+  const [temperatureF, setTemperatureF] = useState('')
+  const [crewCount, setCrewCount] = useState('')
+  const [hoursWorked, setHoursWorked] = useState('')
+  const [publish, setPublish] = useState(false)
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
+  const [isDrafting, setIsDrafting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Fetch photos for all reports in this date group
+  const logIds = reports.map((r) => r.id)
+  const { data: reportPhotos = [], isLoading: photosLoading } = useQuery({
+    queryKey: ['worker-report-photos', ...logIds],
+    queryFn: () => getWorkerReportPhotos(supabase, logIds),
+    enabled: logIds.length > 0,
+    staleTime: 60_000,
+  })
+
+  function togglePhoto(documentId: string) {
+    setSelectedDocIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(documentId)) {
+        next.delete(documentId)
+      } else {
+        next.add(documentId)
+      }
+      return next
+    })
+  }
+
+  async function handleDraftWithAI() {
+    setIsDrafting(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+
+      const res = await fetch('/.netlify/functions/draft-daily-summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          tenantId,
+          projectName: 'this project',
+          reports: reports.map((r) => ({
+            authorName: fmtAuthorName(r.author_profile),
+            logType: r.log_type,
+            workPerformed: r.work_performed,
+          })),
+        }),
+      })
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(json.error ?? `Draft failed (${res.status})`)
+      }
+
+      const json = await res.json() as { summary?: string; text?: string }
+      const drafted = json.summary ?? json.text ?? ''
+      if (drafted) {
+        setSummaryText(drafted)
+        toast.success('AI draft ready — review and edit before saving')
+      } else {
+        toast.error('No draft text returned')
+      }
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setIsDrafting(false)
+    }
+  }
+
+  async function handleSave() {
+    if (!summaryText.trim()) return
+    setIsSubmitting(true)
+    try {
+      await createSummaryLog(supabase, tenantId, projectId, userId, {
+        date,
+        weather: weather || null,
+        temperature_f: temperatureF ? Number(temperatureF) : null,
+        crew_count: crewCount ? Number(crewCount) : null,
+        hours_worked: hoursWorked ? Number(hoursWorked) : null,
+        work_performed: summaryText.trim(),
+        is_client_visible: publish,
+        publish,
+        selectedDocumentIds: [...selectedDocIds],
+      } satisfies CreateSummaryLogInput)
+
+      qc.invalidateQueries({ queryKey: ['project-field', projectId] })
+      toast.success('Summary created')
+      onSuccess()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  })
+
+  // Group photos by report for author labels
+  const photosByLogId = new Map<string, WorkerReportPhotoInfo[]>()
+  for (const photo of reportPhotos) {
+    const arr = photosByLogId.get(photo.logId) ?? []
+    arr.push(photo)
+    photosByLogId.set(photo.logId, arr)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl flex flex-col" style={{ maxHeight: '90vh' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 shrink-0">
+          <h2 className="text-base font-semibold text-gray-900">
+            Create Daily Summary — {formattedDate}
+          </h2>
+          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+
+          {/* Section 1: Internal Reports */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+              Internal Reports ({reports.length})
+            </p>
+            <div className="space-y-2">
+              {reports.map((r) => (
+                <div key={r.id} className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-gray-700">
+                      {fmtAuthorName(r.author_profile)}
+                    </span>
+                    {r.log_type === 'field_associate' ? (
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">FA</span>
+                    ) : (
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">Sub</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 whitespace-pre-line">{r.work_performed}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 2: Select Photos */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+              Select Photos
+              {selectedDocIds.size > 0 && (
+                <span className="ml-2 text-brand-600 normal-case font-medium">
+                  {selectedDocIds.size} selected
+                </span>
+              )}
+            </p>
+            {photosLoading ? (
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="aspect-square animate-pulse rounded-lg bg-gray-200" />
+                ))}
+              </div>
+            ) : reportPhotos.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">No photos attached to these reports.</p>
+            ) : (
+              <div className="space-y-3">
+                {reports.map((r) => {
+                  const photos = photosByLogId.get(r.id) ?? []
+                  if (photos.length === 0) return null
+                  return (
+                    <div key={r.id}>
+                      <p className="text-[11px] text-gray-400 mb-1.5">
+                        {fmtAuthorName(r.author_profile)}
+                      </p>
+                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                        {photos.map((photo) => {
+                          const isSelected = selectedDocIds.has(photo.documentId)
+                          return (
+                            <button
+                              key={photo.id}
+                              type="button"
+                              onClick={() => togglePhoto(photo.documentId)}
+                              className={`relative aspect-square overflow-hidden rounded-lg border-2 transition-all ${
+                                isSelected
+                                  ? 'border-brand-500 ring-2 ring-brand-300'
+                                  : 'border-transparent opacity-70 hover:opacity-100'
+                              }`}
+                            >
+                              <img
+                                src={photo.signedUrl}
+                                alt={photo.caption ?? 'Report photo'}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                              {isSelected && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-brand-600/20">
+                                  <span className="rounded-full bg-brand-600 p-0.5 text-[10px] text-white">✓</span>
+                                </div>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Section 3: Client-Facing Summary */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Client-Facing Summary *
+              </p>
+              <button
+                type="button"
+                onClick={handleDraftWithAI}
+                disabled={isDrafting}
+                className="flex items-center gap-1.5 rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 transition-colors"
+              >
+                {isDrafting ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
+                    Drafting…
+                  </>
+                ) : (
+                  <>✨ Draft with AI</>
+                )}
+              </button>
+            </div>
+            <textarea
+              rows={5}
+              placeholder="Write a client-facing summary of today's work…"
+              value={summaryText}
+              onChange={(e) => setSummaryText(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+            />
+          </div>
+
+          {/* Weather / Crew row */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Weather</label>
+              <input
+                type="text"
+                placeholder="Partly cloudy"
+                value={weather}
+                onChange={(e) => setWeather(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Temp (°F)</label>
+              <input
+                type="number"
+                placeholder="72"
+                value={temperatureF}
+                onChange={(e) => setTemperatureF(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Crew #</label>
+              <input
+                type="number"
+                placeholder="8"
+                value={crewCount}
+                onChange={(e) => setCrewCount(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Hours</label>
+              <input
+                type="number"
+                step="0.5"
+                placeholder="64"
+                value={hoursWorked}
+                onChange={(e) => setHoursWorked(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+          </div>
+
+          {/* Section 4: Options */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-gray-700">Publish immediately</p>
+                <p className="text-[11px] text-gray-400">Make this summary available to the client portal</p>
+              </div>
+              <Toggle checked={publish} onChange={setPublish} />
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 border-t border-gray-100 px-6 py-4 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!summaryText.trim() || isSubmitting}
+            onClick={handleSave}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {isSubmitting ? 'Saving…' : 'Save Summary'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Worker Reports Section ─────────────────────────────────────────────────
+
+interface WorkerReportsSectionProps {
+  reports: ProjectDailyLog[]
+  projectId: string
+  tenantId: string
+  userId: string
+  role: string | null
+  summaryLogs: ProjectDailyLog[]
+}
+
+function WorkerReportsSection({
+  reports,
+  projectId,
+  tenantId,
+  userId,
+  role,
+  summaryLogs,
+}: WorkerReportsSectionProps) {
+  const qc = useQueryClient()
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [showSubmitModal, setShowSubmitModal] = useState(false)
+  const [summaryBuilderDate, setSummaryBuilderDate] = useState<string | null>(null)
+
+  const isFieldWorker = ['field_associate', 'field_super', 'subcontractor'].includes(role ?? '')
+  const isPM = ['project_manager', 'admin', 'owner'].includes(role ?? '')
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['project-field', projectId] })
+
+  // Dates that already have a summary log
+  const summarizedDates = new Set(summaryLogs.map((s) => s.date))
+
+  // Group reports by date (sorted descending)
+  const reportsByDate = new Map<string, ProjectDailyLog[]>()
+  for (const r of reports) {
+    const arr = reportsByDate.get(r.date) ?? []
+    arr.push(r)
+    reportsByDate.set(r.date, arr)
+  }
+  const sortedDates = [...reportsByDate.keys()].sort((a, b) => b.localeCompare(a))
+
+  // Reports for the summary builder (filtered by selected date)
+  const reportsForBuilderDate = summaryBuilderDate
+    ? (reportsByDate.get(summaryBuilderDate) ?? [])
+    : []
+
+  return (
+    <>
+      <div className="rounded-xl border border-gray-200 bg-white shadow-card">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">
+            Field Reports
+            <span className="ml-2 text-xs font-normal text-gray-400">{reports.length}</span>
+          </h2>
+          {isFieldWorker && (
+            <button
+              onClick={() => setShowSubmitModal(true)}
+              className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+              Submit Report
+            </button>
+          )}
+        </div>
+
+        {reports.length === 0 ? (
+          <EmptySection label="No field reports yet." />
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {sortedDates.map((date) => {
+              const dateReports = reportsByDate.get(date) ?? []
+              const hasSummary = summarizedDates.has(date)
+              const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+              })
+
+              return (
+                <div key={date}>
+                  {/* Date group header */}
+                  <div className="flex items-center justify-between bg-gray-50/60 px-5 py-2 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-600">{formattedDate}</span>
+                    {isPM && !hasSummary && (
+                      <button
+                        onClick={() => setSummaryBuilderDate(date)}
+                        className="rounded-md bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+                      >
+                        Create Summary →
+                      </button>
+                    )}
+                    {isPM && hasSummary && (
+                      <span className="rounded bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-600">
+                        Summary created
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Reports for this date */}
+                  {dateReports.map((report) => {
+                    const isOpen = expanded === report.id
+                    return (
+                      <div key={report.id}>
+                        <div className="flex items-start gap-2 px-5 py-3">
+                          {/* Expand toggle */}
+                          <button
+                            onClick={() => setExpanded(isOpen ? null : report.id)}
+                            className="mt-0.5 shrink-0 text-gray-400 hover:text-gray-600"
+                            title={isOpen ? 'Collapse' : 'Expand'}
+                          >
+                            <span className="text-xs">{isOpen ? '▲' : '▼'}</span>
+                          </button>
+
+                          {/* Main content */}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium text-gray-800">
+                                {fmtAuthorName(report.author_profile)}
+                              </span>
+                              {report.log_type === 'field_associate' ? (
+                                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">FA</span>
+                              ) : (
+                                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">Sub</span>
+                              )}
+                            </div>
+                            <p className={`mt-0.5 text-xs text-gray-500 ${isOpen ? '' : 'line-clamp-2'}`}>
+                              {report.work_performed}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Expanded detail */}
+                        {isOpen && (
+                          <div className="border-t border-gray-100 bg-gray-50/50 px-5 py-3 ml-7 space-y-2">
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Work Performed</p>
+                              <p className="mt-0.5 text-xs text-gray-700 whitespace-pre-line">{report.work_performed}</p>
+                            </div>
+                            {/* Photos */}
+                            <LogPhotoGallery
+                              logId={report.id}
+                              projectId={projectId}
+                              tenantId={tenantId}
+                              userId={userId}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Worker Report Modal */}
+      {showSubmitModal && (
+        <WorkerReportModal
+          projectId={projectId}
+          tenantId={tenantId}
+          userId={userId}
+          role={role}
+          onSuccess={() => {
+            setShowSubmitModal(false)
+            invalidate()
+          }}
+          onClose={() => setShowSubmitModal(false)}
+        />
+      )}
+
+      {/* Summary Builder Modal */}
+      {summaryBuilderDate !== null && (
+        <SummaryBuilderModal
+          projectId={projectId}
+          tenantId={tenantId}
+          userId={userId}
+          date={summaryBuilderDate}
+          reports={reportsForBuilderDate}
+          onClose={() => setSummaryBuilderDate(null)}
+          onSuccess={() => setSummaryBuilderDate(null)}
+        />
+      )}
+    </>
+  )
+}
+
+// ── Daily Summary Section ──────────────────────────────────────────────────
+
+interface DailySummarySectionProps {
+  logs: ProjectDailyLog[]
+  internalReports: ProjectDailyLog[]
+  projectId: string
+  tenantId: string
+  userId: string
+  role: string | null
+}
+
+function DailySummarySection({
+  logs,
+  internalReports,
+  projectId,
+  tenantId,
+  userId,
+  role,
+}: DailySummarySectionProps) {
   const qc = useQueryClient()
   const toast = useToast()
   const [expanded, setExpanded] = useState<string | null>(null)
   const [modal, setModal] = useState<{ type: 'create' } | { type: 'edit'; log: ProjectDailyLog } | null>(null)
+  const [summaryBuilderOpen, setSummaryBuilderOpen] = useState(false)
+
+  const isPM = ['project_manager', 'admin', 'owner'].includes(role ?? '')
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['project-field', projectId] })
 
@@ -806,6 +1547,7 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
         issues_or_delays: vals.issues_or_delays || null,
         is_client_visible: vals.is_client_visible,
         publish: vals.publish,
+        log_type: 'summary',
       } satisfies CreateDailyLogInput)
       if (photos.length > 0) {
         await Promise.all(
@@ -813,7 +1555,7 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
         )
       }
     },
-    onSuccess: () => { invalidate(); setModal(null); toast.success('Daily log created') },
+    onSuccess: () => { invalidate(); setModal(null); toast.success('Summary created') },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -835,17 +1577,16 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
         await Promise.all(
           photos.map((f) => uploadDailyLogPhoto(supabase, tenantId, projectId, logId, userId, f)),
         )
-        // Invalidate the photo gallery for this log so it refreshes on re-expand
         qc.invalidateQueries({ queryKey: ['log-photos', logId] })
       }
     },
-    onSuccess: () => { invalidate(); setModal(null); toast.success('Log updated') },
+    onSuccess: () => { invalidate(); setModal(null); toast.success('Summary updated') },
     onError: (e: Error) => toast.error(e.message),
   })
 
   const publishMut = useMutation({
     mutationFn: (logId: string) => publishDailyLog(supabase, logId),
-    onSuccess: () => { invalidate(); toast.success('Log published') },
+    onSuccess: () => { invalidate(); toast.success('Summary published') },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -858,26 +1599,40 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
 
   const isBusy = createMut.isPending || editMut.isPending
 
+  // Get today's date for the summary builder default
+  const builderDate = todayIso()
+  const reportsForBuilder = internalReports.filter((r) => r.date === builderDate)
+
   return (
     <>
       <div className="rounded-xl border border-gray-200 bg-white shadow-card">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-gray-900">Daily Logs</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Daily Summaries</h2>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-400">{logs.length} logs</span>
-            <button
-              onClick={() => setModal({ type: 'create' })}
-              className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              New Log
-            </button>
+            {isPM && internalReports.length > 0 && (
+              <button
+                onClick={() => setSummaryBuilderOpen(true)}
+                className="flex items-center gap-1 rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+              >
+                Create Summary from Reports
+              </button>
+            )}
+            {isPM && (
+              <button
+                onClick={() => setModal({ type: 'create' })}
+                className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                New Summary
+              </button>
+            )}
           </div>
         </div>
 
         {logs.length === 0 ? (
-          <EmptySection label="No daily logs yet. Create the first one above." />
+          <EmptySection label="No daily summaries yet." />
         ) : (
           <div className="divide-y divide-gray-100">
             {logs.map((log) => {
@@ -926,35 +1681,37 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
                       </p>
                     </div>
 
-                    {/* Actions */}
-                    <div className="flex shrink-0 items-center gap-2">
-                      {/* Client visible toggle */}
-                      <Toggle
-                        checked={log.is_client_visible}
-                        onChange={(v) => visibleMut.mutate({ logId: log.id, visible: v })}
-                        label="Client"
-                      />
+                    {/* Actions — only for PM+ */}
+                    {isPM && (
+                      <div className="flex shrink-0 items-center gap-2">
+                        {/* Client visible toggle */}
+                        <Toggle
+                          checked={log.is_client_visible}
+                          onChange={(v) => visibleMut.mutate({ logId: log.id, visible: v })}
+                          label="Client"
+                        />
 
-                      {/* Publish button — only for draft logs */}
-                      {!isPublished && (
+                        {/* Publish button — only for draft logs */}
+                        {!isPublished && (
+                          <button
+                            onClick={() => publishMut.mutate(log.id)}
+                            disabled={publishMut.isPending}
+                            className="rounded-md bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+                          >
+                            Publish
+                          </button>
+                        )}
+
+                        {/* Edit button */}
                         <button
-                          onClick={() => publishMut.mutate(log.id)}
-                          disabled={publishMut.isPending}
-                          className="rounded-md bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+                          onClick={() => setModal({ type: 'edit', log })}
+                          className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                          title="Edit summary"
                         >
-                          Publish
+                          <PencilIcon className="h-3.5 w-3.5" />
                         </button>
-                      )}
-
-                      {/* Edit button — always available for staff */}
-                      <button
-                        onClick={() => setModal({ type: 'edit', log })}
-                        className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                        title="Edit log"
-                      >
-                        <PencilIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Expanded detail */}
@@ -988,7 +1745,7 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
         )}
       </div>
 
-      {/* Modals */}
+      {/* Create/Edit Summary Modal */}
       {modal?.type === 'create' && (
         <DailyLogModal
           mode="create"
@@ -1004,6 +1761,22 @@ function DailyLogsSection({ logs, projectId, tenantId, userId }: DailyLogsSectio
           onSubmit={(vals, photos) => editMut.mutate({ logId: modal.log.id, vals, photos })}
           onClose={() => setModal(null)}
           isLoading={isBusy}
+        />
+      )}
+
+      {/* Summary Builder from Reports */}
+      {summaryBuilderOpen && (
+        <SummaryBuilderModal
+          projectId={projectId}
+          tenantId={tenantId}
+          userId={userId}
+          date={builderDate}
+          reports={reportsForBuilder}
+          onClose={() => setSummaryBuilderOpen(false)}
+          onSuccess={() => {
+            setSummaryBuilderOpen(false)
+            qc.invalidateQueries({ queryKey: ['project-field', projectId] })
+          }}
         />
       )}
     </>
@@ -1205,7 +1978,17 @@ export function FieldTab() {
   const { id: projectId } = useParams<{ id: string }>()
   const { isLoading: projectLoading } = useOutletContext<OutletCtx>()
   const { data: fieldData, isLoading: fieldLoading } = useProjectFieldData(projectId)
-  const { user, activeTenantId } = useAuth()
+  const { user, activeTenantId, tenantMemberships } = useAuth()
+
+  const role = tenantMemberships.find((m) => m.tenant_id === activeTenantId)?.role ?? null
+  const isPM = ['project_manager', 'admin', 'owner'].includes(role ?? '')
+  const canManageField = ['field_super', 'accountant', 'project_manager', 'admin', 'owner'].includes(role ?? '')
+  const isFieldWorker = ['field_associate', 'field_super', 'subcontractor'].includes(role ?? '')
+
+  // Suppress unused-variable warnings for role flags that may be used by future callers
+  void isPM
+  void canManageField
+  void isFieldWorker
 
   const isLoading = projectLoading || fieldLoading
 
@@ -1213,10 +1996,11 @@ export function FieldTab() {
     return <div className="px-5 py-6 lg:px-8"><FieldSkeleton /></div>
   }
 
-  const rfis       = fieldData?.rfis       ?? []
-  const punchItems = fieldData?.punchItems ?? []
-  const submittals = fieldData?.submittals ?? []
-  const dailyLogs  = fieldData?.dailyLogs  ?? []
+  const rfis             = fieldData?.rfis             ?? []
+  const punchItems       = fieldData?.punchItems       ?? []
+  const submittals       = fieldData?.submittals       ?? []
+  const summaryLogs      = fieldData?.summaryLogs      ?? []
+  const internalReports  = fieldData?.internalReports  ?? []
 
   return (
     <div className="space-y-4 px-5 py-6 lg:px-8">
@@ -1224,14 +2008,29 @@ export function FieldTab() {
         rfis={rfis}
         punchItems={punchItems}
         submittals={submittals}
-        dailyLogs={dailyLogs}
+        summaryLogs={summaryLogs}
       />
-      <DailyLogsSection
-        logs={dailyLogs}
+
+      {/* Worker reports — visible to all (RLS filters to own for FA/sub) */}
+      <WorkerReportsSection
+        reports={internalReports}
         projectId={projectId!}
         tenantId={activeTenantId!}
         userId={user!.id}
+        role={role}
+        summaryLogs={summaryLogs}
       />
+
+      {/* Client-facing summaries */}
+      <DailySummarySection
+        logs={summaryLogs}
+        internalReports={internalReports}
+        projectId={projectId!}
+        tenantId={activeTenantId!}
+        userId={user!.id}
+        role={role}
+      />
+
       <RfisSection rfis={rfis} />
       <PunchListSection items={punchItems} />
       <SubmittalsSection submittals={submittals} />

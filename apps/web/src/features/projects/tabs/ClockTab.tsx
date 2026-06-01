@@ -24,6 +24,8 @@ import {
   removeProjectMember,
   getTenantEmployees,
   logSessionMileage,
+  upsertWorkerDailyReport,
+  uploadDailyLogPhoto,
 } from '@indigo/shared'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
@@ -332,6 +334,21 @@ export function ClockTab() {
     mutationFn: async ({ miles }: { miles: number | null }) => {
       if (!mySession) throw new Error('No active session')
       const sessionId = mySession.id
+
+      // Submit internal daily report first (field workers only)
+      if (isFieldWorker && workReportText.trim()) {
+        const logType = role === 'subcontractor' ? 'subcontractor' : 'field_associate'
+        const today   = new Date().toISOString().slice(0, 10)
+        const { id: logId } = await upsertWorkerDailyReport(
+          supabase, tenantId, projectId!, userId, logType, today, workReportText.trim(),
+        )
+        // Upload photos — best-effort (don't block clock-out on photo failure)
+        for (const photo of workReportPhotos) {
+          await uploadDailyLogPhoto(supabase, tenantId, projectId!, logId, userId, photo)
+            .catch(() => null)
+        }
+      }
+
       const result = await clockOut(
         supabase,
         sessionId,
@@ -345,12 +362,18 @@ export function ClockTab() {
       return result
     },
     onSuccess: (result) => {
+      setShowWorkReportStep(false)
       setShowMileageStep(false)
+      setWorkReportText('')
+      workReportPreviews.forEach((url) => URL.revokeObjectURL(url))
+      setWorkReportPhotos([])
+      setWorkReportPreviews([])
       setMileageInput('')
       qc.invalidateQueries({ queryKey: ['active-session', projectId, userId] })
       qc.invalidateQueries({ queryKey: ['active-sessions', projectId] })
       qc.invalidateQueries({ queryKey: ['work-sessions', projectId] })
       qc.invalidateQueries({ queryKey: ['project-labor', projectId] })
+      qc.invalidateQueries({ queryKey: ['project-field', projectId] })
       const hrs = result.net_hours?.toFixed(2) ?? '0'
       toast.success(`Clocked out — ${hrs} h logged.`)
     },
@@ -487,6 +510,32 @@ export function ClockTab() {
     },
     onError: (err: Error) => toast.error(err.message),
   })
+
+  // ── Work report step (field workers only, shown before mileage) ──────────
+  // Roles that must submit a daily report at clock-out
+  const isFieldWorker = ['field_associate', 'field_super', 'subcontractor'].includes(role ?? '')
+  const [showWorkReportStep, setShowWorkReportStep]       = useState(false)
+  const [workReportText,     setWorkReportText]           = useState('')
+  const [workReportPhotos,   setWorkReportPhotos]         = useState<File[]>([])
+  const [workReportPreviews, setWorkReportPreviews]       = useState<string[]>([])
+  const workReportFileRef = useRef<HTMLInputElement>(null)
+
+  function addWorkReportFiles(files: FileList | null) {
+    if (!files) return
+    const valid = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') && f.size <= 20 * 1024 * 1024,
+    )
+    if (!valid.length) return
+    setWorkReportPhotos((p) => [...p, ...valid])
+    setWorkReportPreviews((p) => [...p, ...valid.map((f) => URL.createObjectURL(f))])
+    if (workReportFileRef.current) workReportFileRef.current.value = ''
+  }
+
+  function removeWorkReportPhoto(idx: number) {
+    URL.revokeObjectURL(workReportPreviews[idx])
+    setWorkReportPhotos((p) => p.filter((_, i) => i !== idx))
+    setWorkReportPreviews((p) => p.filter((_, i) => i !== idx))
+  }
 
   // ── Mileage step (shown between "Clock Out" click and actual clock-out) ──
   const [showMileageStep, setShowMileageStep] = useState(false)
@@ -683,8 +732,96 @@ export function ClockTab() {
                   </div>
                 )}
 
-                {/* Mileage step — shown when user clicks Clock Out */}
-                {showMileageStep ? (
+                {/* ── Work report step (field workers only) ─────────── */}
+                {showWorkReportStep && !showMileageStep ? (
+                  <div className="rounded-xl border border-brand-200 bg-brand-50/40 px-4 py-4 space-y-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Daily Work Report</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Required before clocking out. Not shared with the client.</p>
+                    </div>
+
+                    {/* Work summary */}
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-700">
+                        What did you work on today? <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        value={workReportText}
+                        onChange={(e) => setWorkReportText(e.target.value)}
+                        placeholder="Describe the work you performed…"
+                        rows={3}
+                        autoFocus
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200 resize-none"
+                      />
+                    </div>
+
+                    {/* Photo picker */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-medium text-gray-700">
+                          Site photos <span className="text-red-500">*</span>
+                          <span className="ml-1 font-normal text-gray-400">(at least 1)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => workReportFileRef.current?.click()}
+                          className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                        >
+                          + Add photos
+                        </button>
+                      </div>
+                      <input
+                        ref={workReportFileRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => addWorkReportFiles(e.target.files)}
+                      />
+                      {workReportPreviews.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {workReportPreviews.map((url, i) => (
+                            <div key={i} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200">
+                              <img src={url} alt="" className="h-full w-full object-cover"/>
+                              <button
+                                type="button"
+                                onClick={() => removeWorkReportPhoto(i)}
+                                className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                              >
+                                <span className="text-[10px] leading-none">✕</span>
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => workReportFileRef.current?.click()}
+                            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-brand-300 hover:text-brand-500"
+                          >
+                            <span className="text-xl leading-none">+</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => workReportFileRef.current?.click()}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 py-4 text-sm text-gray-400 hover:border-brand-300 hover:text-brand-500"
+                        >
+                          Tap to add site photos
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => setShowMileageStep(true)}
+                      disabled={!workReportText.trim() || workReportPhotos.length === 0}
+                      className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Continue
+                    </button>
+                  </div>
+
+                ) : showMileageStep ? (
+                  /* ── Mileage step ──────────────────────────────────── */
                   <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-4 space-y-3">
                     <div>
                       <p className="text-sm font-medium text-gray-900">Miles driven today?</p>
@@ -725,6 +862,7 @@ export function ClockTab() {
                       </button>
                     </div>
                   </div>
+
                 ) : (
                   /* ── Normal action buttons ─────────────────────────── */
                   <div className="flex gap-3">
@@ -747,9 +885,9 @@ export function ClockTab() {
                       </button>
                     )}
 
-                    {/* Clock out — opens mileage step */}
+                    {/* Clock out — opens work report step (field workers) or mileage step (PM+) */}
                     <button
-                      onClick={() => setShowMileageStep(true)}
+                      onClick={() => isFieldWorker ? setShowWorkReportStep(true) : setShowMileageStep(true)}
                       className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 active:scale-[0.98] transition-all"
                     >
                       Clock Out
