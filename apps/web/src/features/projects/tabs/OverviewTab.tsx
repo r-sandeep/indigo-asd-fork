@@ -5,6 +5,7 @@ import type { ProjectRow, ProjectInspection, UpsertInspectionInput, InspectionRe
 import {
   formatMoney,
   updateJobPermit,
+  updateProjectDetails,
   getProjectInspections,
   upsertInspection,
   deleteInspection,
@@ -610,10 +611,206 @@ function InspectionRow({
   )
 }
 
+// ── Project details edit modal ─────────────────────────────────────────────
+
+function ProjectDetailsModal({
+  projectId,
+  jobId,
+  job,
+  onClose,
+  onSaved,
+}: {
+  projectId: string
+  jobId: string
+  job: NonNullable<ProjectRow['job']>
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast = useToast()
+
+  // Address
+  const [addressLine1,  setAddressLine1]  = useState(job.address_line1  ?? '')
+  const [addressLine2,  setAddressLine2]  = useState(job.address_line2  ?? '')
+  const [city,          setCity]          = useState(job.city            ?? '')
+  const [state,         setState]         = useState(job.state           ?? '')
+  const [zip,           setZip]           = useState(job.zip             ?? '')
+  // Dates
+  const [startDate,     setStartDate]     = useState(job.start_date         ?? '')
+  const [targetDate,    setTargetDate]    = useState(job.target_completion   ?? '')
+  // Text
+  const [description,   setDescription]   = useState(job.description  ?? '')
+  const [notes,         setNotes]         = useState(job.notes         ?? '')
+  // Contract — current_contract_cents is Indigo-managed; fall back to BB value for display only
+  const displayCents = job.current_contract_cents ?? job.contract_amount_cents ?? job.contract_value_cents
+  const [contractAmt, setContractAmt]    = useState(
+    displayCents != null ? (displayCents / 100).toFixed(2) : '',
+  )
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const cents = contractAmt.trim()
+        ? Math.round(parseFloat(contractAmt.replace(/,/g, '')) * 100)
+        : null
+
+      return updateProjectDetails(supabase, projectId, jobId, {
+        jobs: {
+          address_line1:         addressLine1.trim()  || null,
+          address_line2:         addressLine2.trim()  || null,
+          city:                  city.trim()          || null,
+          state:                 state.trim()         || null,
+          zip:                   zip.trim()           || null,
+          start_date:            startDate            || null,
+          target_completion:     targetDate           || null,
+          description:           description.trim()   || null,
+          notes:                 notes.trim()         || null,
+          current_contract_cents: cents,
+        },
+      })
+    },
+    onSuccess: () => {
+      toast.success('Project details updated.')
+      onSaved()
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Failed to save', err instanceof Error ? err.message : 'Try again.')
+    },
+  })
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    mutation.mutate()
+  }
+
+  return (
+    <ModalShell title="Edit Project Details" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+          {/* Contract amount */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Contract Amount</label>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input
+                type="number"
+                value={contractAmt}
+                onChange={(e) => setContractAmt(e.target.value)}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                className={`${inputCls} pl-7`}
+                autoFocus
+              />
+            </div>
+            <p className="mt-1 text-xs text-gray-400">Sets the Indigo contract value. Does not affect BuildersBooks.</p>
+          </div>
+
+          {/* Dates */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Start Date</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Target Completion</label>
+              <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+
+          {/* Address */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Site Address</label>
+            <input
+              type="text"
+              value={addressLine1}
+              onChange={(e) => setAddressLine1(e.target.value)}
+              placeholder="Street address"
+              className={inputCls}
+            />
+            <input
+              type="text"
+              value={addressLine2}
+              onChange={(e) => setAddressLine2(e.target.value)}
+              placeholder="Suite, unit, apt (optional)"
+              className={inputCls}
+            />
+            <div className="grid grid-cols-6 gap-2">
+              <input
+                type="text"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="City"
+                className={`${inputCls} col-span-3`}
+              />
+              <input
+                type="text"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                placeholder="State"
+                maxLength={2}
+                className={`${inputCls} col-span-1 uppercase`}
+              />
+              <input
+                type="text"
+                value={zip}
+                onChange={(e) => setZip(e.target.value)}
+                placeholder="ZIP"
+                maxLength={10}
+                className={`${inputCls} col-span-2`}
+              />
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Description <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Scope of work, project overview…"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none"
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Notes <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Internal notes…"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-5 py-3">
+          <button type="button" onClick={onClose} disabled={mutation.isPending}
+            className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={mutation.isPending}
+            className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60">
+            {mutation.isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  )
+}
+
 // ── Modal state ────────────────────────────────────────────────────────────
 
 type ModalState =
   | { type: 'none' }
+  | { type: 'edit-details' }
   | { type: 'permit' }
   | { type: 'add-inspection' }
   | { type: 'edit-inspection'; inspection: ProjectInspection }
@@ -731,10 +928,22 @@ export function OverviewTab() {
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Job details */}
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-card">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <BuildingOfficeIcon className="h-4 w-4 text-gray-400" strokeWidth={1.75} />
-            Job Details
-          </h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <BuildingOfficeIcon className="h-4 w-4 text-gray-400" strokeWidth={1.75} />
+              Job Details
+            </h2>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setModal({ type: 'edit-details' })}
+                className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-brand-700 transition-colors"
+              >
+                <PencilIcon className="h-3 w-3" strokeWidth={2} />
+                Edit
+              </button>
+            )}
+          </div>
           <div>
             <DetailRow label="Address" value={
               fullAddress
@@ -887,6 +1096,16 @@ export function OverviewTab() {
       )}
 
       {/* ── Modals ──────────────────────────────────────────────────── */}
+
+      {modal.type === 'edit-details' && (
+        <ProjectDetailsModal
+          projectId={id!}
+          jobId={job.id}
+          job={job}
+          onClose={() => setModal({ type: 'none' })}
+          onSaved={refresh}
+        />
+      )}
 
       {modal.type === 'permit' && (
         <PermitModal
