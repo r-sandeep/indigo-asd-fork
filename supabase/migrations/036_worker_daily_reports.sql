@@ -30,9 +30,18 @@ COMMENT ON COLUMN daily_logs.log_type IS
 
 -- ── 2. Unique constraints ─────────────────────────────────────────────────────
 
--- Drop the old single-log-per-day constraint
-ALTER TABLE daily_logs
-  DROP CONSTRAINT IF EXISTS daily_logs_project_id_date_key;
+-- Drop the old single-log-per-day constraint.
+-- Wrapped in a DO block to guarantee Postgres executes ALTER TABLE … DROP CONSTRAINT
+-- (not DROP INDEX) even if the migration runner reinterprets bare DDL statements.
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname    = 'daily_logs_project_id_date_key'
+       AND conrelid   = 'daily_logs'::regclass
+  ) THEN
+    ALTER TABLE daily_logs DROP CONSTRAINT daily_logs_project_id_date_key;
+  END IF;
+END $$;
 
 -- One SUMMARY per project per day (client-facing log)
 CREATE UNIQUE INDEX IF NOT EXISTS daily_logs_one_summary_per_day
