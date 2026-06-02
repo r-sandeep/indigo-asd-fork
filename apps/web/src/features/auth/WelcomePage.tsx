@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
@@ -7,11 +7,31 @@ export function WelcomePage() {
   const { user, isLoading, tenantMemberships, hasFetchedMemberships } = useAuth()
   const navigate = useNavigate()
 
-  const [password,    setPassword]    = useState('')
-  const [confirm,     setConfirm]     = useState('')
-  const [loading,     setLoading]     = useState(false)
-  const [error,       setError]       = useState<string | null>(null)
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [password,      setPassword]      = useState('')
+  const [confirm,       setConfirm]       = useState('')
+  const [loading,       setLoading]       = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
+  const [showConfirm,   setShowConfirm]   = useState(false)
+  // null = still verifying, true = valid, false = stale/deleted user
+  const [sessionValid,  setSessionValid]  = useState<boolean | null>(null)
+
+  // Verify the session against the live Supabase Auth database.
+  // supabase.auth.getUser() makes a server-side call to /auth/v1/user
+  // and will fail if the JWT's sub claim refers to a deleted user —
+  // which happens when a test account is deleted and re-invited without
+  // clearing localStorage first.
+  useEffect(() => {
+    if (!user) return
+    supabase.auth.getUser().then(({ error: userError }) => {
+      if (userError) {
+        // Stale or invalid session — clear it so the user can start fresh
+        supabase.auth.signOut({ scope: 'local' }).catch(() => null)
+        setSessionValid(false)
+      } else {
+        setSessionValid(true)
+      }
+    })
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Still checking session — show nothing rather than a misleading screen.
   if (isLoading) return null
@@ -21,6 +41,21 @@ export function WelcomePage() {
   // so we don't redirect too early on a slow connection.
   if (user && hasFetchedMemberships && tenantMemberships.length > 0) {
     return <Navigate to="/" replace />
+  }
+
+  // Session was invalidated (e.g. stale token from a deleted test account).
+  if (sessionValid === false) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-sm text-center">
+          <div className="text-4xl">🔗</div>
+          <h2 className="mt-4 text-base font-semibold text-gray-900">Invitation link expired</h2>
+          <p className="mt-2 text-sm text-gray-500">
+            This session is no longer valid. Please click the invite link in your email again to continue.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   // Not authenticated — invite link not yet clicked or already expired.
@@ -43,6 +78,9 @@ export function WelcomePage() {
       </div>
     )
   }
+
+  // Still verifying the session server-side — hold steady.
+  if (sessionValid === null) return null
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
