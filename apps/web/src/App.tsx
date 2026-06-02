@@ -7,6 +7,7 @@ import { usePortalAuthListener, usePortalAuth } from '@/hooks/usePortalAuth'
 import { AppShell } from '@/components/AppShell'
 import { ToastProvider } from '@/components/ui/Toast'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { WelcomePage } from '@/features/auth/WelcomePage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
@@ -108,6 +109,14 @@ function AuthRoutes() {
   )
 }
 
+// ── Welcome / password-setup route ────────────────────────────────────────
+// Invite links redirect here. Sits outside RequireAuth so new users can
+// reach it before their tenant membership is confirmed.
+function WelcomeRoute() {
+  useAuthListener()
+  return <WelcomePage />
+}
+
 // ── Portal auth guard ──────────────────────────────────────────────────────
 
 function RequirePortalAuth({ children }: { children: React.ReactNode }) {
@@ -179,6 +188,8 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
+          {/* First-time invite acceptance — outside all auth guards */}
+          <Route path="/welcome" element={<WelcomeRoute />} />
           {/* Customer portal — separate auth context */}
           <Route path="/portal/*" element={<PortalRoutes />} />
           {/* Staff app */}
