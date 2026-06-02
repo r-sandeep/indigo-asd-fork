@@ -66,6 +66,13 @@ function AuthRoutes() {
   useAuthListener()
   const { user, isLoading, tenantMemberships, activeTenantId } = useAuth()
 
+  // When a user clicks an invite email link, Supabase appends #type=invite
+  // to whatever redirect_to URL was used. Catch it here regardless of
+  // which path Supabase chose to redirect to, and send the user to /welcome
+  // so they can set their password before entering the app.
+  const isInviteFlow = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('type') === 'invite'
+  if (isInviteFlow) return <Navigate to="/welcome" replace />
+
   const activeMembership = tenantMemberships.find((m) => m.tenant_id === activeTenantId)
   const isFieldRole = FIELD_ROLES.has(activeMembership?.role ?? '')
 
