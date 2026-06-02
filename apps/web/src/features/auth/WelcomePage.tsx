@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 
 export function WelcomePage() {
-  const { user, tenantMemberships } = useAuth()
+  const { user, isLoading, tenantMemberships, hasFetchedMemberships } = useAuth()
   const navigate = useNavigate()
 
   const [password,    setPassword]    = useState('')
@@ -13,14 +13,17 @@ export function WelcomePage() {
   const [error,       setError]       = useState<string | null>(null)
   const [showConfirm, setShowConfirm] = useState(false)
 
-  // If this is an existing user who somehow landed here (e.g. bookmarked),
-  // send them straight to the app.
-  if (user && tenantMemberships.length > 0) {
-    navigate('/', { replace: true })
-    return null
+  // Still checking session — show nothing rather than a misleading screen.
+  if (isLoading) return null
+
+  // Fully set-up user landed here by mistake (e.g. bookmark) — send to app.
+  // Wait until memberships have actually been fetched before redirecting,
+  // so we don't redirect too early on a slow connection.
+  if (user && hasFetchedMemberships && tenantMemberships.length > 0) {
+    return <Navigate to="/" replace />
   }
 
-  // Not yet authenticated — invite link not processed yet.
+  // Not authenticated — invite link not yet clicked or already expired.
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
