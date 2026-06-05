@@ -43,7 +43,7 @@ export function WelcomePage() {
   // the "already set up" signal.
   const hasCompletedSetup = hasFetchedMemberships &&
     tenantMemberships.length > 0 &&
-    tenantMemberships.some((m) => Boolean((m as Record<string, unknown>).accepted_at))
+    tenantMemberships.some((m) => m.accepted_at != null)
 
   if (user && hasCompletedSetup) {
     return <Navigate to="/" replace />
