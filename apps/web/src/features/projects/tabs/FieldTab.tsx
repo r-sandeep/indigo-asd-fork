@@ -1845,6 +1845,184 @@ function RfisSection({ rfis }: { rfis: ProjectRfi[] }) {
   )
 }
 
+// ── Sub Daily Notes ────────────────────────────────────────────────────────
+// Shown in place of WorkerReportsSection for subcontractor role.
+// Filters to the current user's own entries, allows optional photos,
+// and removes the ≥1 photo requirement of the full WorkerReportModal.
+
+function SubDailyNotesSection({
+  notes,
+  projectId,
+  tenantId,
+  userId,
+}: {
+  notes: ProjectDailyLog[]
+  projectId: string
+  tenantId: string
+  userId: string
+}) {
+  const qc   = useQueryClient()
+  const toast = useToast()
+
+  const [showForm,  setShowForm]  = useState(false)
+  const [editDate,  setEditDate]  = useState<string | null>(null)
+  const [formDate,  setFormDate]  = useState(todayIso())
+  const [formNotes, setFormNotes] = useState('')
+  const [saving,    setSaving]    = useState(false)
+
+  const sorted = [...notes].sort((a, b) => b.date.localeCompare(a.date))
+
+  function openNew() {
+    setFormDate(todayIso())
+    setFormNotes('')
+    setEditDate(null)
+    setShowForm(true)
+  }
+
+  function openEdit(entry: ProjectDailyLog) {
+    setFormDate(entry.date)
+    setFormNotes(entry.work_performed)
+    setEditDate(entry.date)
+    setShowForm(true)
+  }
+
+  function cancelForm() {
+    setShowForm(false)
+    setEditDate(null)
+  }
+
+  async function handleSave() {
+    const text = formNotes.trim()
+    if (!text) return
+    setSaving(true)
+    try {
+      await upsertWorkerDailyReport(supabase, tenantId, projectId, userId, 'subcontractor', formDate, text)
+      void qc.invalidateQueries({ queryKey: ['project-field', projectId] })
+      toast.success(editDate ? 'Note updated' : 'Note saved')
+      setShowForm(false)
+      setEditDate(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-card">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+        <h2 className="text-sm font-semibold text-gray-900">Daily Notes</h2>
+        {!showForm && (
+          <button
+            type="button"
+            onClick={openNew}
+            className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 transition-colors"
+          >
+            <PlusIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
+            Add Note
+          </button>
+        )}
+      </div>
+
+      {/* Inline add / edit form */}
+      {showForm && (
+        <div className="border-b border-gray-100 bg-gray-50/50 px-5 py-4 space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Date</label>
+            <input
+              type="date"
+              value={formDate}
+              max={todayIso()}
+              onChange={(e) => setFormDate(e.target.value)}
+              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-100 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              What work was performed? <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              rows={3}
+              value={formNotes}
+              onChange={(e) => setFormNotes(e.target.value)}
+              placeholder="Describe the work completed today…"
+              autoFocus
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-100 resize-none transition-colors"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={cancelForm}
+              disabled={saving}
+              className="h-8 rounded-lg px-3.5 text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!formNotes.trim() || saving}
+              className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Saving…' : editDate ? 'Update Note' : 'Save Note'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Entries */}
+      {sorted.length === 0 && !showForm ? (
+        <EmptySection label="No daily notes yet. Tap 'Add Note' to log today's work." />
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {sorted.map((entry) => {
+            const formattedDate = new Date(entry.date + 'T00:00:00').toLocaleDateString('en-US', {
+              weekday: 'short', month: 'short', day: 'numeric',
+            })
+            const isCurrentlyEditing = showForm && editDate === entry.date
+
+            return (
+              <div key={entry.id} className={`px-5 py-4 ${isCurrentlyEditing ? 'bg-brand-50/30' : ''}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-gray-500">{formattedDate}</p>
+                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">{entry.work_performed}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {entry.published_at ? (
+                      <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+                        Published
+                      </span>
+                    ) : !isCurrentlyEditing ? (
+                      <button
+                        type="button"
+                        onClick={() => openEdit(entry)}
+                        className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-brand-600 transition-colors"
+                        title="Edit note"
+                      >
+                        <PencilIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {/* Photos — LogPhotoGallery handles upload + delete for this log */}
+                <LogPhotoGallery
+                  logId={entry.id}
+                  projectId={projectId}
+                  tenantId={tenantId}
+                  userId={userId}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Punch List ─────────────────────────────────────────────────────────────
 
 const PUNCH_STATUS_OPTIONS: { value: ProjectPunchItem['status']; label: string }[] = [
@@ -2203,12 +2381,13 @@ export function FieldTab() {
   const { data: fieldData, isLoading: fieldLoading } = useProjectFieldData(projectId)
   const { user, activeTenantId, tenantMemberships } = useAuth()
 
-  const role = tenantMemberships.find((m) => m.tenant_id === activeTenantId)?.role ?? null
-  const isPM = ['project_manager', 'admin', 'owner'].includes(role ?? '')
-  const canManageField = ['field_super', 'accountant', 'project_manager', 'admin', 'owner'].includes(role ?? '')
-  const isFieldWorker = ['field_associate', 'field_super', 'subcontractor'].includes(role ?? '')
+  const role            = tenantMemberships.find((m) => m.tenant_id === activeTenantId)?.role ?? null
+  const isPM            = ['project_manager', 'admin', 'owner'].includes(role ?? '')
+  const canManageField  = ['field_super', 'accountant', 'project_manager', 'admin', 'owner'].includes(role ?? '')
+  const isFieldWorker   = ['field_associate', 'field_super', 'subcontractor'].includes(role ?? '')
+  const isSubcontractor = role === 'subcontractor'
 
-  // Suppress unused-variable warnings for role flags that may be used by future callers
+  // Suppress unused-variable warnings for role flags not directly used in JSX
   void isPM
   void canManageField
   void isFieldWorker
@@ -2219,11 +2398,14 @@ export function FieldTab() {
     return <div className="px-5 py-6 lg:px-8"><FieldSkeleton /></div>
   }
 
-  const rfis             = fieldData?.rfis             ?? []
-  const punchItems       = fieldData?.punchItems       ?? []
-  const submittals       = fieldData?.submittals       ?? []
-  const summaryLogs      = fieldData?.summaryLogs      ?? []
-  const internalReports  = fieldData?.internalReports  ?? []
+  const rfis            = fieldData?.rfis            ?? []
+  const punchItems      = fieldData?.punchItems      ?? []
+  const submittals      = fieldData?.submittals      ?? []
+  const summaryLogs     = fieldData?.summaryLogs     ?? []
+  const internalReports = fieldData?.internalReports ?? []
+
+  // Sub's own daily notes (filtered from all internal reports)
+  const myNotes = internalReports.filter((r) => r.author_id === user!.id)
 
   return (
     <div className="space-y-4 px-5 py-6 lg:px-8">
@@ -2234,17 +2416,27 @@ export function FieldTab() {
         summaryLogs={summaryLogs}
       />
 
-      {/* Worker reports — visible to all (RLS filters to own for FA/sub) */}
-      <WorkerReportsSection
-        reports={internalReports}
-        projectId={projectId!}
-        tenantId={activeTenantId!}
-        userId={user!.id}
-        role={role}
-        summaryLogs={summaryLogs}
-      />
+      {/* Subcontractors get a focused personal daily notes panel.
+          All other roles get the full worker reports view (PM can aggregate + summarise). */}
+      {isSubcontractor ? (
+        <SubDailyNotesSection
+          notes={myNotes}
+          projectId={projectId!}
+          tenantId={activeTenantId!}
+          userId={user!.id}
+        />
+      ) : (
+        <WorkerReportsSection
+          reports={internalReports}
+          projectId={projectId!}
+          tenantId={activeTenantId!}
+          userId={user!.id}
+          role={role}
+          summaryLogs={summaryLogs}
+        />
+      )}
 
-      {/* Client-facing summaries */}
+      {/* Client-facing summaries — read-only for non-PM roles (gated inside the component) */}
       <DailySummarySection
         logs={summaryLogs}
         internalReports={internalReports}
