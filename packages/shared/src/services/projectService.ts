@@ -1232,9 +1232,16 @@ export async function updateChangeOrder(
   coId: string,
   input: UpdateChangeOrderInput,
 ): Promise<void> {
+  // description and notes are NOT NULL columns — coerce null to '' to match
+  // the same guard applied in createChangeOrder.
+  const payload = {
+    ...input,
+    ...('description' in input && { description: input.description ?? '' }),
+    ...('notes'       in input && { notes:       input.notes       ?? '' }),
+  }
   const { error } = await client
     .from('job_change_orders')
-    .update({ ...input } as unknown as never)
+    .update(payload as unknown as never)
     .eq('id', coId)
   if (error) throw error
 }
