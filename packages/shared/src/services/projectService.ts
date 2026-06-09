@@ -2507,6 +2507,36 @@ export async function getTenantEmployees(
 }
 
 /**
+ * Returns all tenant members with role 'subcontractor', joined with their
+ * user_profiles. Mirrors getTenantEmployees() but scoped to subs only.
+ */
+export async function getTenantSubcontractors(
+  client: SupabaseClient,
+  tenantId: string,
+): Promise<TenantEmployee[]> {
+  const { data, error } = await client
+    .from('tenant_members')
+    .select(`
+      id,
+      user_id,
+      role,
+      is_active,
+      created_at,
+      profile:user_profiles!tenant_members_user_id_fkey ( first_name, last_name, email, avatar_url, title, phone )
+    `)
+    .eq('tenant_id', tenantId)
+    .eq('role', 'subcontractor')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+
+  return ((data ?? []) as unknown as TenantEmployee[]).map((e) => ({
+    ...e,
+    current_wage_cents: null,
+  }))
+}
+
+/**
  * Returns aggregated work stats for a single employee across all projects.
  * Only counts completed / auto_closed sessions.
  */

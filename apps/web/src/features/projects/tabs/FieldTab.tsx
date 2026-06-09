@@ -14,6 +14,7 @@ import type {
   CreateSummaryLogInput,
   CreatePunchListItemInput,
   UpdatePunchListItemInput,
+  ProjectMemberRow,
 } from '@indigo/shared'
 import {
   createDailyLog,
@@ -30,13 +31,18 @@ import {
   createPunchListItem,
   updatePunchListItem,
   deletePunchListItem,
+  getProjectMembers,
+  addProjectMember,
+  removeProjectMember,
+  getTenantEmployees,
+  getTenantSubcontractors,
 } from '@indigo/shared'
 import { useProjectFieldData } from '../useProject'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
 import { useToast } from '@/stores/toastStore'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { PlusIcon, PencilIcon, TrashIcon } from '@/components/ui/Icons'
+import { PlusIcon, PencilIcon, TrashIcon, UsersIcon } from '@/components/ui/Icons'
 
 interface OutletCtx {
   project: ProjectRow | undefined
@@ -2340,6 +2346,244 @@ function SubmittalsSection({ submittals }: { submittals: ProjectSubmittal[] }) {
 
 // ── Shared empty state ─────────────────────────────────────────────────────
 
+function formatRole(r: string): string {
+  const map: Record<string, string> = {
+    owner: 'Owner', admin: 'Admin', project_manager: 'Project Manager',
+    field_super: 'Field Super', field_associate: 'Field Associate',
+    accountant: 'Accountant', subcontractor: 'Subcontractor',
+  }
+  return map[r] ?? r
+}
+
+// ── Project Team Section ───────────────────────────────────────────────────
+
+const EMPLOYEE_ROLES = [
+  { value: 'field_associate', label: 'Field Associate' },
+  { value: 'field_super',     label: 'Field Super'     },
+  { value: 'project_manager', label: 'PM'              },
+]
+
+function ProjectTeamSection({
+  projectId,
+  tenantId,
+}: {
+  projectId: string
+  tenantId:  string
+}) {
+  const qc    = useQueryClient()
+  const toast = useToast()
+
+  const [showAdd,      setShowAdd]      = useState(false)
+  const [addType,      setAddType]      = useState<'employee' | 'sub'>('employee')
+  const [search,       setSearch]       = useState('')
+  const [empRole,      setEmpRole]      = useState('field_associate')
+
+  const { data: members = [], isLoading: membersLoading } = useQuery({
+    queryKey:  ['project-members', projectId],
+    queryFn:   () => getProjectMembers(supabase, projectId),
+    staleTime: 30_000,
+  })
+
+  const { data: tenantEmps = [] } = useQuery({
+    queryKey:  ['tenant-employees', tenantId],
+    queryFn:   () => getTenantEmployees(supabase, tenantId),
+    enabled:   showAdd && addType === 'employee',
+    staleTime: 60_000,
+  })
+
+  const { data: tenantSubs = [] } = useQuery({
+    queryKey:  ['tenant-subcontractors', tenantId],
+    queryFn:   () => getTenantSubcontractors(supabase, tenantId),
+    enabled:   showAdd && addType === 'sub',
+    staleTime: 60_000,
+  })
+
+  const addMut = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      addProjectMember(supabase, projectId, tenantId, userId, role),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project-members', projectId] })
+      setSearch('')
+      toast.success('Added to project.')
+    },
+    onError: (err: Error) => {
+      toast.error(
+        err.message.includes('duplicate') || err.message.includes('unique')
+          ? 'Already on this project.'
+          : 'Failed to add member.',
+      )
+    },
+  })
+
+  const removeMut = useMutation({
+    mutationFn: (memberId: string) => removeProjectMember(supabase, memberId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project-members', projectId] })
+      toast.success('Removed from project.')
+    },
+    onError: () => toast.error('Failed to remove member.'),
+  })
+
+  const memberUserIds = new Set(members.map((m: ProjectMemberRow) => m.user_id))
+  const pool          = addType === 'sub' ? tenantSubs : tenantEmps
+  const available     = pool.filter((e) => {
+    if (!e.is_active) return false
+    if (memberUserIds.has(e.user_id)) return false
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      e.profile?.first_name?.toLowerCase().includes(q) ||
+      e.profile?.last_name?.toLowerCase().includes(q) ||
+      e.profile?.email?.toLowerCase().includes(q)
+    )
+  })
+
+  function openAdd(type: 'employee' | 'sub') {
+    setAddType(type)
+    setSearch('')
+    setShowAdd(true)
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-card">
+      <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+          <UsersIcon className="h-4 w-4 text-gray-400" />
+          Project Team
+        </h2>
+        <div className="flex items-center gap-2">
+          {showAdd ? (
+            <button
+              onClick={() => setShowAdd(false)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => openAdd('employee')}
+                className="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+              >
+                + Employee
+              </button>
+              <button
+                onClick={() => openAdd('sub')}
+                className="rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100 transition-colors"
+              >
+                + Subcontractor
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Add panel */}
+      {showAdd && (
+        <div className="border-b border-gray-100 bg-gray-50 px-5 py-4 space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+            {addType === 'sub' ? 'Add Subcontractor' : 'Add Employee'}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+              autoFocus
+            />
+            {addType === 'employee' && (
+              <select
+                value={empRole}
+                onChange={(e) => setEmpRole(e.target.value)}
+                className="rounded-lg border border-gray-300 px-2 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+              >
+                {EMPLOYEE_ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {available.length === 0 ? (
+            <p className="text-xs italic text-gray-400 py-1">
+              {search
+                ? 'No matches.'
+                : addType === 'sub'
+                  ? 'All invited subcontractors are already on this project.'
+                  : 'All active employees are already on this project.'}
+            </p>
+          ) : (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {available.slice(0, 15).map((person) => (
+                <div
+                  key={person.user_id}
+                  className="flex items-center justify-between rounded-lg bg-white px-3 py-2 border border-gray-100"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {person.profile?.first_name} {person.profile?.last_name}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {formatRole(person.role)} · {person.profile?.email}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => addMut.mutate({
+                      userId: person.user_id,
+                      role:   addType === 'sub' ? 'subcontractor' : empRole,
+                    })}
+                    disabled={addMut.isPending}
+                    className="ml-3 shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Current member list */}
+      {membersLoading ? (
+        <div className="space-y-2 px-5 py-4">
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+        </div>
+      ) : members.length === 0 ? (
+        <EmptySection label="No team members assigned yet." />
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {(members as ProjectMemberRow[]).map((m) => (
+            <div key={m.id} className="flex items-center justify-between px-5 py-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-7 w-7 rounded-full bg-brand-100 flex items-center justify-center text-xs font-semibold text-brand-700 shrink-0">
+                  {m.profile?.first_name?.[0] ?? '?'}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {m.profile?.first_name} {m.profile?.last_name}
+                  </p>
+                  <p className="text-xs text-gray-400">{formatRole(m.role)}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => removeMut.mutate(m.id)}
+                disabled={removeMut.isPending}
+                className="ml-3 shrink-0 rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EmptySection({ label }: { label: string }) {
   return (
     <div className="px-5 py-10 text-center">
@@ -2388,7 +2632,6 @@ export function FieldTab() {
   const isSubcontractor = role === 'subcontractor'
 
   // Suppress unused-variable warnings for role flags not directly used in JSX
-  void isPM
   void canManageField
   void isFieldWorker
 
@@ -2415,6 +2658,13 @@ export function FieldTab() {
         submittals={submittals}
         summaryLogs={summaryLogs}
       />
+
+      {isPM && (
+        <ProjectTeamSection
+          projectId={projectId!}
+          tenantId={activeTenantId!}
+        />
+      )}
 
       {/* Subcontractors get a focused personal daily notes panel.
           All other roles get the full worker reports view (PM can aggregate + summarise). */}
