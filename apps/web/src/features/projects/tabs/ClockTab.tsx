@@ -304,18 +304,45 @@ export function ClockTab() {
   const isActive = mySession?.status === 'active'
   const isClockedIn = isActive || isOnBreak
 
+  // ── Off-site override state ────────────────────────────────────────────────
+
+  const OFFSITE_REASONS = [
+    'Picking up materials',
+    'En route to job site',
+    'Pre-job preparation',
+    'Other',
+  ] as const
+
+  const [showOffsitePanel, setShowOffsitePanel] = useState(false)
+  const [offsiteReason,    setOffsiteReason]    = useState<string>('')
+  const [offsiteOther,     setOffsiteOther]      = useState('')
+  const [pmApproved,       setPmApproved]        = useState(false)
+
+  const resolvedReason = offsiteReason === 'Other' ? offsiteOther.trim() : offsiteReason
+  const offsiteReady   = !!resolvedReason && pmApproved
+
+  function resetOffsitePanel() {
+    setShowOffsitePanel(false)
+    setOffsiteReason('')
+    setOffsiteOther('')
+    setPmApproved(false)
+  }
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const clockInMut = useMutation({
-    mutationFn: () => {
+    mutationFn: (opts?: { offsiteReason?: string; pmPurchaseApproved?: boolean }) => {
       if (!geo.lat || !geo.lng) throw new Error('No GPS fix')
-      return clockIn(supabase, projectId!, geo.lat, geo.lng, geo.accuracyM ?? 999)
+      return clockIn(supabase, projectId!, geo.lat, geo.lng, geo.accuracyM ?? 999,
+        opts?.offsiteReason, opts?.pmPurchaseApproved)
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['active-session', projectId, userId] })
       qc.invalidateQueries({ queryKey: ['active-sessions', projectId] })
+      qc.invalidateQueries({ queryKey: ['geofence-violations', projectId] })
+      resetOffsitePanel()
       if (!result.geofence_ok) {
-        toast.warning('Clocked in with GPS warning — location may be inaccurate.')
+        toast.warning('Clocked in off-site — your location has been logged.')
       } else {
         toast.success('Clocked in successfully.')
       }
@@ -647,17 +674,104 @@ export function ClockTab() {
         )}
       </div>
 
-      {/* ── Geofence warning if blocked ────────────────────────────── */}
+      {/* ── Geofence warning + off-site override panel ─────────────── */}
       {geofenceBlocked && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
-          <ExclamationTriangleIcon className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-red-800">Outside work area</p>
-            <p className="text-xs text-red-600 mt-0.5">
-              You are {distanceFromSite} m from the site (fence: {effectiveRadius} m).
-              Move closer before clocking in.
-            </p>
+        <div className="space-y-3">
+          {/* Red warning banner */}
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
+            <ExclamationTriangleIcon className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-red-800">Outside work area</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                You are {distanceFromSite} m from the site (fence: {effectiveRadius} m).
+                Move closer, or use the off-site override below if authorized.
+              </p>
+            </div>
           </div>
+
+          {/* Off-site override panel */}
+          {!showOffsitePanel ? (
+            <button
+              type="button"
+              onClick={() => setShowOffsitePanel(true)}
+              className="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 hover:bg-amber-100 transition-colors text-left flex items-center justify-between"
+            >
+              <span>Clock in off-site (PM authorized)</span>
+              <span className="text-amber-500 text-xs">▸</span>
+            </button>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                Off-site clock-in
+              </p>
+
+              {/* Reason picker */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-amber-800">
+                  Reason <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-1.5">
+                  {OFFSITE_REASONS.map((r) => (
+                    <label key={r} className="flex cursor-pointer items-center gap-2 text-sm text-amber-900">
+                      <input
+                        type="radio"
+                        name="offsite-reason"
+                        value={r}
+                        checked={offsiteReason === r}
+                        onChange={() => { setOffsiteReason(r); setOffsiteOther('') }}
+                        className="h-4 w-4 text-amber-600 focus:ring-amber-500"
+                      />
+                      {r}
+                    </label>
+                  ))}
+                </div>
+                {offsiteReason === 'Other' && (
+                  <input
+                    type="text"
+                    value={offsiteOther}
+                    onChange={(e) => setOffsiteOther(e.target.value)}
+                    placeholder="Describe the reason…"
+                    autoFocus
+                    className="mt-2 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-200"
+                  />
+                )}
+              </div>
+
+              {/* PM authorization attestation */}
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={pmApproved}
+                  onChange={(e) => setPmApproved(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="text-sm text-amber-900 leading-snug">
+                  I confirm this off-site activity has been specifically authorized
+                  by my Project Manager.
+                </span>
+              </label>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={resetOffsitePanel}
+                  disabled={clockInMut.isPending}
+                  className="h-8 rounded-lg px-3.5 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!offsiteReady || clockInMut.isPending}
+                  onClick={() => clockInMut.mutate({ offsiteReason: resolvedReason, pmPurchaseApproved: pmApproved })}
+                  className="inline-flex h-8 items-center rounded-lg bg-amber-600 px-4 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {clockInMut.isPending ? 'Clocking in…' : 'Clock In Off-Site'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1229,23 +1343,40 @@ export function ClockTab() {
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-700 mb-3 flex items-center gap-2">
                 <ExclamationTriangleIcon className="h-4 w-4" />
-                Recent Geofence Violations ({violations.length})
+                Recent Geofence Exceptions ({violations.length})
               </h3>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
+              <div className="space-y-3 max-h-64 overflow-y-auto">
                 {violations.slice(0, 20).map((v) => (
-                  <div key={v.id} className="flex items-center justify-between text-xs">
-                    <span className="text-amber-800">
-                      {v.attempt_type === 'clock_in' ? 'Clock-in' : 'Clock-out'} —{' '}
-                      {Math.round(v.distance_from_site_m)} m from site
-                      {v.was_rejected && (
-                        <span className="ml-1 inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-                          REJECTED
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-amber-600 whitespace-nowrap ml-4">
-                      {fmtDate(v.attempted_at)} {fmtTime(v.attempted_at)}
-                    </span>
+                  <div key={v.id} className="text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-800">
+                        {v.attempt_type === 'clock_in' ? 'Clock-in' : 'Clock-out'} —{' '}
+                        {Math.round(v.distance_from_site_m)} m from site
+                        {v.was_rejected ? (
+                          <span className="ml-1 inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                            REJECTED
+                          </span>
+                        ) : v.offsite_reason ? (
+                          <span className="ml-1 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                            OFF-SITE
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-amber-600 whitespace-nowrap ml-4">
+                        {fmtDate(v.attempted_at)} {fmtTime(v.attempted_at)}
+                      </span>
+                    </div>
+                    {v.offsite_reason && (
+                      <div className="mt-1 pl-0 space-y-0.5">
+                        <p className="text-amber-700">
+                          <span className="font-medium">Reason:</span> {v.offsite_reason}
+                        </p>
+                        <p className={v.pm_purchase_approved ? 'text-green-700' : 'text-red-600'}>
+                          <span className="font-medium">PM authorized:</span>{' '}
+                          {v.pm_purchase_approved ? '✓ Yes' : '✗ No'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
