@@ -802,7 +802,7 @@ export function ClockTab() {
                 </div>
 
                 <button
-                  onClick={() => clockInMut.mutate()}
+                  onClick={() => clockInMut.mutate({})}
                   disabled={
                     clockInMut.isPending ||
                     geo.isLoading ||

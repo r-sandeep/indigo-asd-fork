@@ -1883,6 +1883,8 @@ export interface GeofenceViolation {
   geofence_radius_m: number
   was_rejected: boolean
   attempted_at: string
+  offsite_reason: string | null
+  pm_purchase_approved: boolean | null
 }
 
 export interface EmployeeWage {
@@ -1934,13 +1936,17 @@ export async function clockIn(
   lat: number,
   lng: number,
   accuracyM: number,
+  offsiteReason?: string,
+  pmPurchaseApproved?: boolean,
 ): Promise<ClockInResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (client as any).rpc('clock_in', {
-    p_project_id: projectId,
-    p_lat:        lat,
-    p_lng:        lng,
-    p_accuracy_m: accuracyM,
+    p_project_id:           projectId,
+    p_lat:                  lat,
+    p_lng:                  lng,
+    p_accuracy_m:           accuracyM,
+    p_offsite_reason:       offsiteReason       ?? null,
+    p_pm_purchase_approved: pmPurchaseApproved  ?? null,
   })
   if (error) throw error
   return data as ClockInResult
