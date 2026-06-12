@@ -448,7 +448,7 @@ export function ClockTab() {
     try {
       const coords = await geocodeAddress(parts.join(', '))
       if (!coords) {
-        setGeocodeErr('Could not locate address — check that VITE_GOOGLE_MAPS_API_KEY is set.')
+        setGeocodeErr('Address not found — try entering a more specific address, or use GPS.')
         return
       }
       setLocationMut.mutate({
@@ -456,8 +456,8 @@ export function ClockTab() {
         lng:    coords.lng,
         radius: siteData?.geofence_radius_meters ?? null,
       })
-    } catch {
-      setGeocodeErr('Geocoding failed. Try again.')
+    } catch (err) {
+      setGeocodeErr(err instanceof Error ? err.message : 'Geocoding failed. Try again.')
     } finally {
       geocodingRef.current = false
       setGeocoding(false)
