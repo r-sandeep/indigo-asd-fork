@@ -20,6 +20,7 @@ import type {
   PortalChangeOrder,
   PortalSelectionCategory,
   PortalPunchItem,
+  PortalProjectJob,
   DailyLogPhoto,
 } from '@indigo/shared'
 import { supabase } from '@/lib/supabase'
@@ -1103,6 +1104,7 @@ function InvoiceRow({ inv }: { inv: PortalInvoice }) {
 // ── Finances tab ───────────────────────────────────────────────────────────
 
 function FinancesTab({
+  job,
   milestones,
   invoices,
   changeOrders,
@@ -1110,6 +1112,7 @@ function FinancesTab({
   approvingCoId,
   readOnly,
 }: {
+  job:           PortalProjectJob | null
   milestones:    PortalMilestone[]
   invoices:      PortalInvoice[]
   changeOrders:  PortalChangeOrder[]
@@ -1147,8 +1150,56 @@ function FinancesTab({
     .filter((co) => effectiveCOStatus(co) === 'approved')
     .reduce((sum, co) => sum + co.amount_cents, 0)
 
+  const originalCents  = job?.contract_value_cents ?? null
+  const pendingCOs     = changeOrders.filter((co) => effectiveCOStatus(co) === 'pending_approval')
+  const pendingCoTotal = pendingCOs.reduce((sum, co) => sum + co.amount_cents, 0)
+  const currentCents   = originalCents != null ? originalCents + approvedCoTotal : null
+
   return (
     <div className="space-y-4">
+
+      {/* Contract Summary */}
+      {originalCents != null && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 text-base font-semibold text-gray-900">Contract Summary</h2>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">Original Contract</span>
+              <span className="text-sm font-medium tabular-nums text-gray-900">{formatMoney(originalCents)}</span>
+            </div>
+            {approvedCoTotal !== 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  Approved Change Orders
+                  {changeOrders.filter((co) => effectiveCOStatus(co) === 'approved').length > 0 && (
+                    <span className="ml-1 text-xs text-gray-400">
+                      ({changeOrders.filter((co) => effectiveCOStatus(co) === 'approved').length})
+                    </span>
+                  )}
+                </span>
+                <span className={`text-sm font-medium tabular-nums ${approvedCoTotal >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                  {approvedCoTotal >= 0 ? '+' : ''}{formatMoney(approvedCoTotal)}
+                </span>
+              </div>
+            )}
+            {pendingCOs.length > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  Pending Change Orders
+                  <span className="ml-1 text-xs text-gray-400">({pendingCOs.length} awaiting approval)</span>
+                </span>
+                <span className="text-sm font-medium tabular-nums text-amber-600">
+                  {pendingCoTotal >= 0 ? '+' : ''}{formatMoney(pendingCoTotal)}
+                </span>
+              </div>
+            )}
+            <div className="mt-1 flex items-center justify-between border-t border-gray-100 pt-2">
+              <span className="text-sm font-semibold text-gray-900">Current Contract</span>
+              <span className="text-base font-bold tabular-nums text-gray-900">{formatMoney(currentCents!)}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment Schedule */}
       {paymentMilestones.length > 0 && (
@@ -1918,7 +1969,14 @@ export function PortalProjectPage() {
             milestones={milestones}
             startDate={job?.start_date ?? null}
             targetCompletion={job?.target_completion ?? null}
-            contractCents={job?.current_contract_cents ?? job?.contract_value_cents ?? null}
+            contractCents={(() => {
+              const orig = job?.contract_value_cents ?? null
+              if (orig == null) return null
+              const approvedSum = changeOrders
+                .filter((co) => co.co_status === 'approved' || co.status?.toLowerCase() === 'approved')
+                .reduce((sum, co) => sum + co.amount_cents, 0)
+              return orig + approvedSum
+            })()}
           />
           <OverviewActions
             milestones={milestones}
@@ -1947,6 +2005,7 @@ export function PortalProjectPage() {
 
       {activeTab === 'finances' && (
         <FinancesTab
+          job={job}
           milestones={milestones}
           invoices={invoices}
           changeOrders={changeOrders}

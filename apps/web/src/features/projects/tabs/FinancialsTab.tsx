@@ -705,11 +705,13 @@ function ContractSummary({
   invoices: ProjectInvoice[]
 }) {
   const original = job?.contract_value_cents ?? job?.contract_amount_cents ?? null
-  const current  = job?.current_contract_cents ?? original
 
   const approvedCOs = changeOrders
     .filter((co) => co.co_status === 'approved')
     .reduce((sum, co) => sum + co.amount_cents, 0)
+
+  // Current contract = original + all approved COs (not the stale DB cache column)
+  const current = original != null ? original + approvedCOs : null
 
   const totalBilled = invoices.reduce((s, i) => s + i.total_cents, 0)
   const billedPct   = current && current > 0 ? Math.round((totalBilled / current) * 100) : 0

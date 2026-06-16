@@ -10,7 +10,7 @@ import {
   upsertInspection,
   deleteInspection,
 } from '@indigo/shared'
-import { useProjectPhases } from '../useProject'
+import { useProjectPhases, useProjectChangeOrders } from '../useProject'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/stores/toastStore'
@@ -822,6 +822,7 @@ export function OverviewTab() {
   const { id } = useParams<{ id: string }>()
   const { project, isLoading } = useOutletContext<OutletCtx>()
   const { data: phases, isLoading: phasesLoading } = useProjectPhases(id)
+  const { data: changeOrders = [] } = useProjectChangeOrders(project?.job?.id)
   const { activeTenantId, user, tenantMemberships } = useAuth()
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -887,9 +888,12 @@ export function OverviewTab() {
 
   if (!job) return null
 
-  // Contract values — prefer current > original > legacy
-  const contractValue = job.current_contract_cents ?? job.contract_amount_cents ?? job.contract_value_cents
-  const originalValue = job.contract_amount_cents ?? job.contract_value_cents
+  // Contract values: original + sum of approved COs
+  const originalValue  = job.contract_value_cents ?? job.contract_amount_cents ?? null
+  const approvedCoSum  = changeOrders
+    .filter((co) => co.co_status === 'approved')
+    .reduce((sum, co) => sum + co.amount_cents, 0)
+  const contractValue  = originalValue != null ? originalValue + approvedCoSum : null
 
   // Days remaining
   const daysLeft = daysRemaining(job.target_completion)
