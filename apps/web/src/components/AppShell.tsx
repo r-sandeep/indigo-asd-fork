@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -12,6 +13,7 @@ import {
   BellIcon,
   Bars3Icon,
   GearIcon,
+  XMarkIcon,
 } from '@/components/ui/Icons'
 
 interface NavItem {
@@ -72,6 +74,7 @@ function SidebarNavItem({ item }: { item: NavItem }) {
 export function AppShell() {
   const { profile, tenantMemberships, activeTenantId } = useAuth()
   const location = useLocation()
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const activeMembership = tenantMemberships.find((m) => m.tenant_id === activeTenantId)
   const activeTenant     = activeMembership?.tenant
@@ -128,6 +131,7 @@ export function AppShell() {
           <button
             className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 transition-colors lg:hidden"
             aria-label="Open menu"
+            onClick={() => setDrawerOpen(true)}
           >
             <Bars3Icon className="h-5 w-5" />
           </button>
@@ -153,6 +157,83 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      {/* ── Mobile drawer ────────────────────────────────────────────── */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setDrawerOpen(false)}
+          />
+          {/* Panel */}
+          <div className="absolute left-0 top-0 bottom-0 w-72 flex flex-col bg-white shadow-xl">
+            {/* Header */}
+            <div className="flex h-14 items-center justify-between border-b border-gray-200 px-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-xs font-bold text-white select-none">
+                  I
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">Indigo</p>
+                  {activeTenant && (
+                    <p className="truncate text-[11px] text-gray-400">{activeTenant.name}</p>
+                  )}
+                </div>
+              </div>
+              <button
+                className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
+                onClick={() => setDrawerOpen(false)}
+                aria-label="Close menu"
+              >
+                <XMarkIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Nav items */}
+            <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
+              {NAV_ITEMS.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  onClick={() => setDrawerOpen(false)}
+                  className={({ isActive }) =>
+                    `relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-r-full before:bg-brand-500'
+                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.Icon
+                        className={`h-[18px] w-[18px] shrink-0 ${isActive ? 'text-brand-600' : 'text-gray-400'}`}
+                        strokeWidth={isActive ? 2 : 1.75}
+                      />
+                      <span>{item.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </nav>
+
+            {/* User profile */}
+            <div className="border-t border-gray-200 p-3">
+              <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">
+                  {userInitial}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-gray-900">{userName}</p>
+                  <p className="truncate text-[11px] text-gray-400">{profile?.email ?? ''}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom nav (mobile only) ──────────────────────────────────── */}
       <nav className="fixed bottom-0 left-0 right-0 z-10 flex items-center justify-around border-t border-gray-200 bg-white/95 backdrop-blur-sm px-2 pb-safe lg:hidden">
