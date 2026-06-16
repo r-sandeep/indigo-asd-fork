@@ -33,6 +33,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/stores/toastStore'
+import { notifyPortalClients } from '@/lib/notifyPortalClients'
 import { Skeleton } from '@/components/ui/Skeleton'
 import {
   CheckIcon,
@@ -176,15 +177,17 @@ function StatusBadge({ status, map }: { status: string | null; map: typeof CO_ST
 
 function CreateCOModal({
   tenantId,
+  projectId,
   jobId,
   userId,
   nextCoNumber,
   onClose,
   onSaved,
 }: {
-  tenantId: string
-  jobId: string
-  userId: string
+  tenantId:  string
+  projectId: string
+  jobId:     string
+  userId:    string
   nextCoNumber: string
   onClose: () => void
   onSaved: () => void
@@ -219,6 +222,14 @@ function CreateCOModal({
     },
     onSuccess: () => {
       toast.success('Change order created')
+      if (coStatus === 'pending_approval') {
+        void notifyPortalClients({
+          projectId,
+          tenantId,
+          type:  'change_order',
+          title: [coNumber.trim(), title.trim()].filter(Boolean).join(' — '),
+        })
+      }
       onSaved()
       onClose()
     },
@@ -314,12 +325,16 @@ function CreateCOModal({
 
 function EditCOModal({
   co,
+  tenantId,
+  projectId,
   onClose,
   onSaved,
 }: {
-  co: ProjectChangeOrder
-  onClose: () => void
-  onSaved: () => void
+  co:        ProjectChangeOrder
+  tenantId:  string
+  projectId: string
+  onClose:   () => void
+  onSaved:   () => void
 }) {
   const toast = useToast()
 
@@ -351,6 +366,15 @@ function EditCOModal({
     },
     onSuccess: () => {
       toast.success('Change order updated')
+      if (coStatus === 'pending_approval' && co.co_status !== 'pending_approval') {
+        // Only notify when status is newly moved to pending_approval
+        void notifyPortalClients({
+          projectId,
+          tenantId,
+          type:  'change_order',
+          title: [coNumber.trim(), title.trim()].filter(Boolean).join(' — '),
+        })
+      }
       onSaved()
       onClose()
     },
@@ -1695,8 +1719,9 @@ export function FinancialsTab() {
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
 
-      {modal.type === 'create-co' && jobId && (
+      {modal.type === 'create-co' && jobId && projectId && (
         <CreateCOModal
+          projectId={projectId}
           tenantId={tenantId}
           jobId={jobId}
           userId={userId}
@@ -1706,8 +1731,10 @@ export function FinancialsTab() {
         />
       )}
 
-      {modal.type === 'edit-co' && (
+      {modal.type === 'edit-co' && projectId && (
         <EditCOModal
+          projectId={projectId}
+          tenantId={tenantId}
           co={modal.co}
           onClose={() => setModal({ type: 'none' })}
           onSaved={refreshCOs}

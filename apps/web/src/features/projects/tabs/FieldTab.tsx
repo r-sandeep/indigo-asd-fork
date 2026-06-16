@@ -41,6 +41,7 @@ import { useProjectFieldData } from '../useProject'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
 import { useToast } from '@/stores/toastStore'
+import { notifyPortalClients } from '@/lib/notifyPortalClients'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { PlusIcon, PencilIcon, TrashIcon, UsersIcon } from '@/components/ui/Icons'
 
@@ -2196,13 +2197,41 @@ function PunchListSection({
   const createMut = useMutation({
     mutationFn: (input: CreatePunchListItemInput) =>
       createPunchListItem(supabase, tenantId, projectId, userId, input),
-    onSuccess: () => { invalidate(); setShowForm(false) },
+    onSuccess: (_, input) => {
+      invalidate()
+      setShowForm(false)
+      if (input.is_client_visible) {
+        void notifyPortalClients({
+          projectId,
+          tenantId,
+          type:        'punch_item',
+          title:       input.title,
+          description: input.description ?? null,
+        })
+      }
+    },
   })
 
   const updateMut = useMutation({
     mutationFn: ({ id, input }: { id: string; input: UpdatePunchListItemInput }) =>
       updatePunchListItem(supabase, id, input),
-    onSuccess: () => { invalidate(); setEditingId(null) },
+    onSuccess: (_, { input }) => {
+      invalidate()
+      setEditingId(null)
+      if (input.is_client_visible) {
+        const item = items.find((i) => i.id === editingId)
+        if (item && !item.is_client_visible) {
+          // Only notify when the flag is being turned ON for the first time
+          void notifyPortalClients({
+            projectId,
+            tenantId,
+            type:        'punch_item',
+            title:       (input.title ?? item.title),
+            description: (input.description ?? item.description) ?? null,
+          })
+        }
+      }
+    },
   })
 
   const deleteMut = useMutation({
