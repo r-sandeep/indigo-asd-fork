@@ -461,6 +461,11 @@ function overage(optionPriceCents: number, allowanceCents: number): number {
   return Math.max(0, optionPriceCents - allowanceCents)
 }
 
+interface ConfirmPayload {
+  optionId:          string | null
+  customDescription: string | null
+}
+
 function SelectionCategoryCard({
   category,
   onConfirm,
@@ -468,18 +473,32 @@ function SelectionCategoryCard({
   readOnly = false,
 }: {
   category:     PortalSelectionCategory
-  onConfirm:    (optionId: string | null) => void
+  onConfirm:    (payload: ConfirmPayload) => void
   isConfirming: boolean
   readOnly?:    boolean
 }) {
   const isLocked     = ['approved', 'ordered', 'received', 'installed'].includes(category.status)
   const hasConfirmed = !!category.selection?.option_id || !!category.selection?.custom_description
 
-  const [isOpen, setIsOpen] = useState(!hasConfirmed && !isLocked)
-  const [picked, setPicked] = useState<string | null>(category.selection?.option_id ?? null)
+  const [isOpen,      setIsOpen]      = useState(!hasConfirmed && !isLocked)
+  const [picked,      setPicked]      = useState<string | null>(category.selection?.option_id ?? null)
+  const [useCustom,   setUseCustom]   = useState(!category.selection?.option_id && !!category.selection?.custom_description)
+  const [customText,  setCustomText]  = useState(category.selection?.custom_description ?? '')
 
   const selectedOption  = category.options.find((o) => o.id === picked)
   const confirmedOption = category.options.find((o) => o.id === category.selection?.option_id)
+
+  function pickCurated(id: string) {
+    setPicked(id)
+    setUseCustom(false)
+  }
+
+  function pickCustom() {
+    setPicked(null)
+    setUseCustom(true)
+  }
+
+  const canConfirm = picked !== null || (useCustom && customText.trim().length > 0)
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -531,75 +550,106 @@ function SelectionCategoryCard({
 
       {isOpen && (
         <div className="border-t border-gray-100">
-          {category.options.length === 0 ? (
-            <p className="px-4 py-3 text-sm text-gray-400">No options added yet by your builder.</p>
-          ) : (
-            <div className="divide-y divide-gray-50">
-              {category.options.map((opt) => {
-                const over     = overage(opt.unit_price_cents, category.allowance_cents)
-                const isPicked = picked === opt.id
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => setPicked(opt.id)}
-                    className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${isPicked ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
-                  >
-                    <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${isPicked ? 'border-brand-600 bg-brand-600' : 'border-gray-300'}`}>
-                      {isPicked && <span className="h-1.5 w-1.5 rounded-full bg-white"/>}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-medium ${isPicked ? 'text-brand-900' : 'text-gray-900'}`}>{opt.name}</p>
-                      {opt.description && <p className="mt-0.5 text-xs text-gray-500">{opt.description}</p>}
-                      <div className="mt-1 flex items-center gap-2 text-xs">
-                        {over > 0 ? (
-                          <span className="font-medium text-amber-600">+{formatMoney(over)} over allowance</span>
-                        ) : (
-                          <span className="font-medium text-green-600">Within allowance</span>
-                        )}
-                        {opt.vendor && <span className="text-gray-400">· {opt.vendor}</span>}
-                        {opt.lead_time_days && <span className="text-gray-400">· {opt.lead_time_days}d lead time</span>}
-                      </div>
-                      {opt.vendor_url && (
-                        <a
-                          href={opt.vendor_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="mt-1 inline-block text-xs text-brand-600 hover:underline"
-                        >
-                          View product ↗
-                        </a>
-                      )}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {category.options.length > 0 && (
-            <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-3">
-              {selectedOption && (
-                <p className="flex-1 text-xs text-gray-500">
-                  Selected: <span className="font-medium text-gray-700">{selectedOption.name}</span>
-                  {overage(selectedOption.unit_price_cents, category.allowance_cents) > 0 && (
-                    <span className="text-amber-600">
-                      {' '}(+{formatMoney(overage(selectedOption.unit_price_cents, category.allowance_cents))})
-                    </span>
-                  )}
-                </p>
-              )}
-              {!readOnly && (
+          <div className="divide-y divide-gray-50">
+            {category.options.map((opt) => {
+              const over     = overage(opt.unit_price_cents, category.allowance_cents)
+              const isPicked = picked === opt.id
+              return (
                 <button
-                  disabled={!picked || isConfirming}
-                  onClick={() => onConfirm(picked)}
-                  className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-40"
+                  key={opt.id}
+                  onClick={() => pickCurated(opt.id)}
+                  className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${isPicked ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
                 >
-                  {isConfirming ? 'Saving…' : 'Confirm Selection'}
+                  <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${isPicked ? 'border-brand-600 bg-brand-600' : 'border-gray-300'}`}>
+                    {isPicked && <span className="h-1.5 w-1.5 rounded-full bg-white"/>}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium ${isPicked ? 'text-brand-900' : 'text-gray-900'}`}>{opt.name}</p>
+                    {opt.description && <p className="mt-0.5 text-xs text-gray-500">{opt.description}</p>}
+                    <div className="mt-1 flex items-center gap-2 text-xs">
+                      {over > 0 ? (
+                        <span className="font-medium text-amber-600">+{formatMoney(over)} over allowance</span>
+                      ) : (
+                        <span className="font-medium text-green-600">Within allowance</span>
+                      )}
+                      {opt.vendor && <span className="text-gray-400">· {opt.vendor}</span>}
+                      {opt.lead_time_days && <span className="text-gray-400">· {opt.lead_time_days}d lead time</span>}
+                    </div>
+                    {opt.vendor_url && (
+                      <a
+                        href={opt.vendor_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1 inline-block text-xs text-brand-600 hover:underline"
+                      >
+                        View product ↗
+                      </a>
+                    )}
+                  </div>
                 </button>
-              )}
-            </div>
-          )}
+              )
+            })}
+
+            {/* Free-text "Input your selection" row */}
+            {!readOnly && (
+              <div
+                className={`px-4 py-3 transition-colors ${useCustom ? 'bg-brand-50' : 'hover:bg-gray-50 cursor-pointer'}`}
+                onClick={() => !useCustom && pickCustom()}
+              >
+                <div className="flex items-start gap-3">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); pickCustom() }}
+                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${useCustom ? 'border-brand-600 bg-brand-600' : 'border-gray-300'}`}
+                  >
+                    {useCustom && <span className="h-1.5 w-1.5 rounded-full bg-white"/>}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium ${useCustom ? 'text-brand-900' : 'text-gray-500'}`}>
+                      Input your selection
+                    </p>
+                    {useCustom && (
+                      <textarea
+                        autoFocus
+                        rows={3}
+                        value={customText}
+                        onChange={(e) => setCustomText(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        placeholder="Input your selection — include brand, model, finish, SKU, or a link if you have one"
+                        className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-3">
+            {selectedOption && !useCustom && (
+              <p className="flex-1 text-xs text-gray-500">
+                Selected: <span className="font-medium text-gray-700">{selectedOption.name}</span>
+                {overage(selectedOption.unit_price_cents, category.allowance_cents) > 0 && (
+                  <span className="text-amber-600">
+                    {' '}(+{formatMoney(overage(selectedOption.unit_price_cents, category.allowance_cents))})
+                  </span>
+                )}
+              </p>
+            )}
+            {!readOnly && (
+              <button
+                disabled={!canConfirm || isConfirming}
+                onClick={() => onConfirm({
+                  optionId:          useCustom ? null : picked,
+                  customDescription: useCustom ? customText.trim() : null,
+                })}
+                className="ml-auto shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-40"
+              >
+                {isConfirming ? 'Saving…' : 'Confirm Selection'}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -620,13 +670,14 @@ function SelectionsTab({
   const queryClient = useQueryClient()
 
   const confirmMut = useMutation({
-    mutationFn: ({ categoryId, optionId }: { categoryId: string; optionId: string | null }) =>
+    mutationFn: ({ categoryId, payload }: { categoryId: string; payload: ConfirmPayload }) =>
       upsertPortalSelection(supabase, {
         categoryId,
-        projectId:  project.id,
-        tenantId:   project.tenant_id,
-        customerId: customerId!,
-        optionId,
+        projectId:         project.id,
+        tenantId:          project.tenant_id,
+        customerId:        customerId!,
+        optionId:          payload.optionId,
+        customDescription: payload.customDescription,
       }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ['portal-selections', project.id] }),
@@ -657,7 +708,7 @@ function SelectionsTab({
         <SelectionCategoryCard
           key={cat.id}
           category={cat}
-          onConfirm={(optId) => confirmMut.mutate({ categoryId: cat.id, optionId: optId })}
+          onConfirm={(payload) => confirmMut.mutate({ categoryId: cat.id, payload })}
           isConfirming={confirmMut.isPending && confirmMut.variables?.categoryId === cat.id}
           readOnly={readOnly}
         />
