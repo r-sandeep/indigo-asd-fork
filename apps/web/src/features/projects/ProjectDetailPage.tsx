@@ -11,8 +11,8 @@ interface Tab {
   live?: boolean
 }
 
-// Tabs visible to subcontractor role only
-const SUB_VISIBLE_TABS = new Set(['Overview', 'Schedule', 'Field'])
+const EMPLOYEE_TABS     = new Set(['Overview', 'Schedule', 'Clock'])
+const SUB_VISIBLE_TABS  = new Set(['Overview', 'Schedule', 'Field'])
 
 function tabs(id: string, role: string | null): Tab[] {
   const all: Tab[] = [
@@ -25,7 +25,10 @@ function tabs(id: string, role: string | null): Tab[] {
     { to: `/projects/${id}/client`,      label: 'Client', live: true },
     { to: `/projects/${id}/clock`,       label: 'Clock',  live: true },
   ]
-  if (role === 'subcontractor') return all.filter((t) => SUB_VISIBLE_TABS.has(t.label))
+  if (role === 'field_associate' || role === 'field_super')
+    return all.filter((t) => EMPLOYEE_TABS.has(t.label))
+  if (role === 'subcontractor')
+    return all.filter((t) => SUB_VISIBLE_TABS.has(t.label))
   return all
 }
 

@@ -860,6 +860,7 @@ export function OverviewTab() {
   const activeRole = tenantMemberships.find((m) => m.tenant_id === tenantId)?.role ?? ''
   const canEdit         = ['owner', 'admin', 'project_manager', 'field_super'].includes(activeRole)
   const isSubcontractor = activeRole === 'subcontractor'
+  const isFieldEmployee = activeRole === 'field_associate' || activeRole === 'field_super'
 
   if (isLoading) {
     return (
@@ -908,7 +909,7 @@ export function OverviewTab() {
     <div className="px-5 py-6 lg:px-8">
       {/* ── Metric cards ──────────────────────────────────────────── */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {!isSubcontractor && (
+        {!isSubcontractor && !isFieldEmployee && (
           <MetricCard
             label="Current Contract"
             value={contractValue != null ? formatMoney(contractValue) : '—'}

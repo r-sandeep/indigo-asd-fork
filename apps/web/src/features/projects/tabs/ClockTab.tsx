@@ -971,7 +971,7 @@ export function ClockTab() {
               .filter((s) => s.user_id === userId)
               .slice(0, 7)
               .map((s) => (
-                <SessionHistoryRow key={s.id} session={s} />
+                <SessionHistoryRow key={s.id} session={s} showCost={isPmOrAbove(role)} />
               ))}
           </div>
         </section>
@@ -1317,7 +1317,7 @@ function OnSiteRow({ session }: { session: WorkSession }) {
   )
 }
 
-function SessionHistoryRow({ session }: { session: WorkSession }) {
+function SessionHistoryRow({ session, showCost }: { session: WorkSession; showCost?: boolean }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white text-sm">
       <div>
@@ -1342,7 +1342,7 @@ function SessionHistoryRow({ session }: { session: WorkSession }) {
             {session.mileage_miles} mi
           </p>
         )}
-        {session.labor_cost_cents != null && (
+        {showCost && session.labor_cost_cents != null && (
           <p className="text-xs text-gray-400">{formatCents(session.labor_cost_cents)}</p>
         )}
       </div>
