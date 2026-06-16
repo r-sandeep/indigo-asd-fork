@@ -513,3 +513,43 @@ export async function getPortalSelections(
     }),
   )
 }
+
+// ── Client-visible punch list items ────────────────────────────────────────
+
+export interface PortalPunchItem {
+  id: string
+  title: string
+  description: string | null
+  location: string | null
+  priority: string
+  status: string
+  due_date: string | null
+  client_notes: string | null
+}
+
+export async function getPortalPunchItems(
+  client: SupabaseClient,
+  projectId: string,
+): Promise<PortalPunchItem[]> {
+  const { data, error } = await client
+    .from('punch_list_items')
+    .select('id, title, description, location, priority, status, due_date, client_notes')
+    .eq('project_id', projectId)
+    .eq('is_client_visible', true)
+    .not('status', 'eq', 'void')
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as PortalPunchItem[]
+}
+
+export async function updatePortalPunchNotes(
+  client: SupabaseClient,
+  itemId: string,
+  notes: string | null,
+): Promise<void> {
+  const { error } = await client.rpc('portal_update_punch_notes', {
+    p_item_id: itemId,
+    p_notes:   notes,
+  } as unknown as undefined)
+  if (error) throw error
+}

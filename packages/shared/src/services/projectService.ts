@@ -587,6 +587,8 @@ export interface ProjectPunchItem {
   status: string
   due_date: string | null
   closed_at: string | null
+  is_client_visible: boolean
+  client_notes: string | null
   created_at: string
 }
 
@@ -681,6 +683,7 @@ export interface CreatePunchListItemInput {
   trade?: string | null
   priority?: 'low' | 'normal' | 'high' | 'blocking'
   due_date?: string | null
+  is_client_visible?: boolean
 }
 
 export interface UpdatePunchListItemInput {
@@ -691,6 +694,7 @@ export interface UpdatePunchListItemInput {
   priority?: 'low' | 'normal' | 'high' | 'blocking'
   due_date?: string | null
   status?: 'open' | 'in_progress' | 'ready_for_review' | 'closed' | 'void'
+  is_client_visible?: boolean
 }
 
 export async function createPunchListItem(
@@ -706,12 +710,13 @@ export async function createPunchListItem(
       tenant_id:   tenantId,
       project_id:  projectId,
       created_by:  userId,
-      title:       input.title,
-      description: input.description ?? null,
-      location:    input.location    ?? null,
-      trade:       input.trade       ?? null,
-      priority:    input.priority    ?? 'normal',
-      due_date:    input.due_date    ?? null,
+      title:             input.title,
+      description:       input.description       ?? null,
+      location:          input.location          ?? null,
+      trade:             input.trade             ?? null,
+      priority:          input.priority          ?? 'normal',
+      due_date:          input.due_date          ?? null,
+      is_client_visible: input.is_client_visible ?? false,
     } as unknown as never)
     .select('id')
     .single()

@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getPortalProjectData,
   getPortalSelections,
+  getPortalPunchItems,
+  updatePortalPunchNotes,
   approvePortalMilestone,
   approvePortalChangeOrder,
   upsertPortalSelection,
@@ -17,6 +19,7 @@ import type {
   PortalDailyLog,
   PortalChangeOrder,
   PortalSelectionCategory,
+  PortalPunchItem,
   DailyLogPhoto,
 } from '@indigo/shared'
 import { supabase } from '@/lib/supabase'
@@ -25,7 +28,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type TabId = 'overview' | 'timeline' | 'finances' | 'updates' | 'documents' | 'selections'
+type TabId = 'overview' | 'timeline' | 'finances' | 'updates' | 'documents' | 'selections' | 'action-items'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1479,6 +1482,190 @@ function DocumentsTab({ documents }: { documents: PortalDocument[] }) {
   )
 }
 
+// ── Action Items icon ──────────────────────────────────────────────────────
+
+function IconActionItems() {
+  return (
+    <svg {...IPROPS}>
+      <rect x="3" y="3" width="14" height="14" rx="2"/>
+      <path d="M7 10l2 2 4-4"/>
+    </svg>
+  )
+}
+
+// ── Priority dot ───────────────────────────────────────────────────────────
+
+const PUNCH_PRIORITY_DOT: Record<string, string> = {
+  low:      'bg-gray-300',
+  normal:   'bg-brand-400',
+  high:     'bg-amber-400',
+  blocking: 'bg-red-500',
+}
+
+const PUNCH_STATUS_LABEL: Record<string, string> = {
+  open:             'Open',
+  in_progress:      'In Progress',
+  ready_for_review: 'Ready for Review',
+  closed:           'Closed',
+  void:             'Void',
+}
+
+// ── Action Items tab ───────────────────────────────────────────────────────
+
+function ActionItemsTab({
+  items,
+  projectId,
+  readOnly,
+}: {
+  items:     PortalPunchItem[]
+  projectId: string
+  readOnly:  boolean
+}) {
+  const queryClient = useQueryClient()
+
+  const notesMut = useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes: string | null }) =>
+      updatePortalPunchNotes(supabase, id, notes),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ['portal-punch-items', projectId] }),
+  })
+
+  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
+
+  if (items.length === 0) {
+    return (
+      <div className="mt-12 text-center">
+        <p className="text-sm text-gray-400">No action items from your builder yet.</p>
+      </div>
+    )
+  }
+
+  const open   = items.filter((i) => i.status !== 'closed')
+  const closed = items.filter((i) => i.status === 'closed')
+
+  function renderItem(item: PortalPunchItem) {
+    const isClosed   = item.status === 'closed'
+    const dotColor   = PUNCH_PRIORITY_DOT[item.priority] ?? PUNCH_PRIORITY_DOT.normal
+    const statusLabel = PUNCH_STATUS_LABEL[item.status] ?? item.status
+    const isEditingThis = editing?.id === item.id
+
+    return (
+      <div key={item.id} className={`px-5 py-4 ${isClosed ? 'opacity-60' : ''}`}>
+        <div className="flex items-start gap-3">
+          <div className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white ${dotColor}`}/>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className={`text-sm font-semibold text-gray-900 ${isClosed ? 'line-through' : ''}`}>
+                {item.title}
+              </p>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                isClosed ? 'bg-green-100 text-green-700' :
+                item.status === 'in_progress' ? 'bg-amber-100 text-amber-700' :
+                'bg-gray-100 text-gray-500'
+              }`}>
+                {statusLabel}
+              </span>
+            </div>
+
+            <div className="mt-0.5 flex flex-wrap gap-2 text-xs text-gray-400">
+              {item.location && <span>{item.location}</span>}
+              {item.due_date && (
+                <span>· Due {new Date(item.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              )}
+            </div>
+
+            {item.description && (
+              <p className="mt-1 text-xs text-gray-600">{item.description}</p>
+            )}
+
+            {/* Client notes */}
+            <div className="mt-3">
+              {isEditingThis ? (
+                <div className="space-y-2">
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    value={editing.draft}
+                    onChange={(e) => setEditing({ id: item.id, draft: e.target.value })}
+                    placeholder="Add your notes or response…"
+                    className="w-full rounded-lg border border-brand-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200 resize-none"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        notesMut.mutate({ id: item.id, notes: editing.draft.trim() || null })
+                        setEditing(null)
+                      }}
+                      disabled={notesMut.isPending}
+                      className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      {notesMut.isPending ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => setEditing(null)}
+                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : item.client_notes ? (
+                <div className="rounded-lg bg-brand-50 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-600 mb-0.5">Your notes</p>
+                  <p className="text-sm text-gray-700">{item.client_notes}</p>
+                  {!readOnly && !isClosed && (
+                    <button
+                      onClick={() => setEditing({ id: item.id, draft: item.client_notes ?? '' })}
+                      className="mt-1.5 text-xs text-brand-600 hover:text-brand-700"
+                    >
+                      Edit note
+                    </button>
+                  )}
+                </div>
+              ) : (
+                !readOnly && !isClosed && (
+                  <button
+                    onClick={() => setEditing({ id: item.id, draft: '' })}
+                    className="text-xs text-brand-600 hover:text-brand-700"
+                  >
+                    + Add your response
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {open.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Open · {open.length}</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {open.map(renderItem)}
+          </div>
+        </div>
+      )}
+
+      {closed.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Completed · {closed.length}</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {closed.map(renderItem)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Loading skeleton ───────────────────────────────────────────────────────
 
 function PortalSkeleton() {
@@ -1539,6 +1726,13 @@ export function PortalProjectPage() {
     staleTime: 30_000,
   })
 
+  const { data: punchItems = [] } = useQuery({
+    queryKey:  ['portal-punch-items', projectId],
+    queryFn:   () => getPortalPunchItems(supabase, projectId!),
+    enabled:   !!projectId,
+    staleTime: 60_000,
+  })
+
   const approveMut = useMutation({
     mutationFn: (milestoneId: string) => approvePortalMilestone(supabase, milestoneId),
     onSuccess: () => {
@@ -1580,6 +1774,7 @@ export function PortalProjectPage() {
     (c) => ['pending', 'client_choosing'].includes(c.status) && !c.selection,
   ).length
 
+  const openPunchCount  = punchItems.filter((p) => p.status !== 'closed').length
   const overviewBadge   = pendingApprovalCount + pendingSelectionCount
   const pendingCoCount  = changeOrders.filter((co) => co.co_status === 'pending_approval').length
   const financesBadge   = invoices.filter((i) => i.balance_due_cents > 0).length + (isStaffPreview ? 0 : pendingCoCount)
@@ -1588,12 +1783,13 @@ export function PortalProjectPage() {
   // ── Tab definitions ───────────────────────────────────────────────────────
 
   const tabs: TabDef[] = [
-    { id: 'overview',   label: 'Overview',   icon: <IconOverview/>,   badge: overviewBadge > 0 ? overviewBadge : undefined },
-    { id: 'timeline',   label: 'Schedule',    icon: <IconTimeline/>   },
-    { id: 'finances',   label: 'Finances',   icon: <IconFinances/>,   badge: financesBadge > 0 ? financesBadge : undefined },
-    { id: 'updates',    label: 'Daily Logs', icon: <IconUpdates/>    },
-    { id: 'documents',  label: 'Documents',  icon: <IconDocuments/>  },
-    { id: 'selections' as TabId, label: 'Selections', icon: <IconSelections/>, badge: !isStaffPreview && selectionsBadge > 0 ? selectionsBadge : undefined },
+    { id: 'overview',      label: 'Overview',      icon: <IconOverview/>,      badge: overviewBadge > 0 ? overviewBadge : undefined },
+    { id: 'timeline',      label: 'Schedule',      icon: <IconTimeline/>      },
+    { id: 'finances',      label: 'Finances',      icon: <IconFinances/>,      badge: financesBadge > 0 ? financesBadge : undefined },
+    { id: 'updates',       label: 'Daily Logs',    icon: <IconUpdates/>       },
+    { id: 'documents',     label: 'Documents',     icon: <IconDocuments/>     },
+    { id: 'selections',    label: 'Selections',    icon: <IconSelections/>,    badge: !isStaffPreview && selectionsBadge > 0 ? selectionsBadge : undefined },
+    ...(punchItems.length > 0 ? [{ id: 'action-items' as TabId, label: 'Action Items', icon: <IconActionItems/>, badge: openPunchCount > 0 ? openPunchCount : undefined }] : []),
   ]
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1673,6 +1869,14 @@ export function PortalProjectPage() {
             readOnly={isStaffPreview}
           />
         )
+      )}
+
+      {activeTab === 'action-items' && (
+        <ActionItemsTab
+          items={punchItems}
+          projectId={projectId!}
+          readOnly={isStaffPreview}
+        />
       )}
     </div>
   )

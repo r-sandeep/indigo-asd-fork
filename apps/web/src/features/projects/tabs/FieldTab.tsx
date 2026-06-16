@@ -2054,6 +2054,7 @@ interface PunchFormData {
   priority: ProjectPunchItem['priority']
   status: ProjectPunchItem['status']
   due_date: string | null
+  is_client_visible: boolean
 }
 
 function PunchItemForm({
@@ -2067,13 +2068,14 @@ function PunchItemForm({
   onCancel: () => void
   isSaving: boolean
 }) {
-  const [title,       setTitle]       = useState(item?.title       ?? '')
-  const [description, setDescription] = useState(item?.description ?? '')
-  const [location,    setLocation]    = useState(item?.location    ?? '')
-  const [trade,       setTrade]       = useState(item?.trade       ?? '')
-  const [priority,    setPriority]    = useState<ProjectPunchItem['priority']>(item?.priority ?? 'normal')
-  const [status,      setStatus]      = useState<ProjectPunchItem['status']>(item?.status ?? 'open')
-  const [dueDate,     setDueDate]     = useState(item?.due_date    ?? '')
+  const [title,          setTitle]          = useState(item?.title            ?? '')
+  const [description,    setDescription]    = useState(item?.description      ?? '')
+  const [location,       setLocation]       = useState(item?.location         ?? '')
+  const [trade,          setTrade]          = useState(item?.trade            ?? '')
+  const [priority,       setPriority]       = useState<ProjectPunchItem['priority']>(item?.priority ?? 'normal')
+  const [status,         setStatus]         = useState<ProjectPunchItem['status']>(item?.status ?? 'open')
+  const [dueDate,        setDueDate]        = useState(item?.due_date         ?? '')
+  const [clientVisible,  setClientVisible]  = useState(item?.is_client_visible ?? false)
 
   const inputCls = 'h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors'
   const selectCls = 'h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 focus:bg-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 transition-colors'
@@ -2128,6 +2130,13 @@ function PunchItemForm({
             <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Additional details…" className={inputCls} />
           </div>
         </div>
+        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium text-gray-700">Client Facing</p>
+            <p className="text-[11px] text-gray-400">Show in the client portal as an action item</p>
+          </div>
+          <Toggle checked={clientVisible} onChange={setClientVisible} />
+        </div>
       </div>
       <div className="mt-3 flex justify-end gap-2">
         <button
@@ -2142,13 +2151,14 @@ function PunchItemForm({
           type="button"
           disabled={!title.trim() || isSaving}
           onClick={() => onSave({
-            title:       title.trim(),
-            description: description.trim() || null,
-            location:    location.trim()    || null,
-            trade:       trade.trim()       || null,
+            title:             title.trim(),
+            description:       description.trim() || null,
+            location:          location.trim()    || null,
+            trade:             trade.trim()       || null,
             priority,
             status,
-            due_date:    dueDate            || null,
+            due_date:          dueDate            || null,
+            is_client_visible: clientVisible,
           })}
           className="inline-flex h-8 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
@@ -2245,6 +2255,9 @@ function PunchListSection({
                           {item.title}
                         </span>
                         <Badge status={item.status} map={PUNCH_STATUS} />
+                        {item.is_client_visible && (
+                          <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-600">CLIENT</span>
+                        )}
                       </div>
                       <div className="mt-0.5 flex flex-wrap gap-2 text-xs text-gray-400">
                         {item.trade    && <span>{item.trade}</span>}
