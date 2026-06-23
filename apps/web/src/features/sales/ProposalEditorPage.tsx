@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useLead } from './useLeads'
 import {
@@ -9,6 +9,7 @@ import {
   useDeleteProposal,
 } from './useProposals'
 import { TemplatePickerModal } from './TemplatePickerModal'
+import { ProposalPDFDocument } from './ProposalPDFDocument'
 import { getProposalStatusMeta, lineTotal, type ProposalLineItem } from './types'
 import { useToast } from '@/stores/toastStore'
 import { formatMoney } from '@indigo/shared'
@@ -427,6 +428,7 @@ export function ProposalEditorPage() {
   const [showDeleteConfirm,  setShowDeleteConfirm]  = useState(false)
   const [isDirty, setIsDirty]                 = useState(false)
   const [isSaving, setIsSaving]               = useState(false)
+  const [isPdfGenerating, setIsPdfGenerating] = useState(false)
   const initialized = useRef(false)
 
   // Populate draft from loaded data
@@ -529,6 +531,28 @@ export function ProposalEditorPage() {
     }
   }
 
+  const handleDownloadPDF = useCallback(async () => {
+    if (!proposal) return
+    setIsPdfGenerating(true)
+    try {
+      const { pdf } = await import('@react-pdf/renderer')
+      const blob = await pdf(
+        <ProposalPDFDocument proposal={proposal} items={savedItems} />
+      ).toBlob()
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href     = url
+      a.download = `${proposal.title || 'Proposal'}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error('PDF generation failed')
+      console.error(err)
+    } finally {
+      setIsPdfGenerating(false)
+    }
+  }, [proposal, savedItems])
+
   // ── Loading ─────────────────────────────────────────────────────────────────
 
   if (propLoading || itemsLoading) {
@@ -579,6 +603,15 @@ export function ProposalEditorPage() {
               Copy Client Link
             </button>
           )}
+
+          {/* Download PDF */}
+          <button
+            onClick={handleDownloadPDF}
+            disabled={isPdfGenerating}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60 transition-colors"
+          >
+            {isPdfGenerating ? 'Generating…' : 'Download PDF'}
+          </button>
 
           {/* Preview */}
           <Link

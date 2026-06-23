@@ -335,6 +335,9 @@ export default defineConfig(({ mode }) => {
         '@indigo/ai': path.resolve(__dirname, '../../packages/ai/src/index.ts'),
       },
     },
+    optimizeDeps: {
+      exclude: ['@react-pdf/renderer'],
+    },
     server: {
       port: 5173,
     },
