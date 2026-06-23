@@ -1,4 +1,4 @@
-import { Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer'
+import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer'
 import type { Proposal, ProposalLineItem } from './types'
 import { lineTotal } from './types'
 
@@ -106,13 +106,18 @@ const S = StyleSheet.create({
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type Props = {
-  proposal: Proposal
-  items:    ProposalLineItem[]
+  proposal:     Proposal
+  items:        ProposalLineItem[]
+  logoUrl?:     string | null
+  companyName?:  string | null
+  companyPhone?: string | null
 }
 
-export function ProposalPDFDocument({ proposal, items }: Props) {
+export function ProposalPDFDocument({ proposal, items, logoUrl, companyName, companyPhone }: Props) {
   const total     = items.reduce((s, it) => s + lineTotal(it), 0)
   const printDate = new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
+  const displayName  = companyName  || 'GOOD GUY BUILDERS'
+  const displayPhone = companyPhone || '(866) 466-3489'
 
   const showItem  = proposal.col_item
   const showDesc  = proposal.col_description
@@ -129,16 +134,23 @@ export function ProposalPDFDocument({ proposal, items }: Props) {
         {/* ── Company header ──────────────────────────────────────────────── */}
         <View style={S.header}>
           <View style={S.logoRow}>
-            <View style={S.logoSquare}>
-              <Text style={S.logoInitials}>GGB</Text>
-            </View>
-            <View>
-              <Text style={S.companyName}>GOOD GUY</Text>
-              <Text style={S.companyTagline}>—BUILDERS—</Text>
-            </View>
+            {logoUrl ? (
+              <Image src={logoUrl} style={{ maxHeight: 48, maxWidth: 180, objectFit: 'contain' }} />
+            ) : (
+              <>
+                <View style={S.logoSquare}>
+                  <Text style={S.logoInitials}>
+                    {displayName.split(' ').map((w: string) => w[0]).join('').slice(0, 3).toUpperCase()}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={S.companyName}>{displayName.toUpperCase()}</Text>
+                </View>
+              </>
+            )}
           </View>
           <View>
-            <Text style={S.contactInfo}>Phone: (866) 466-3489</Text>
+            <Text style={S.contactInfo}>Phone: {displayPhone}</Text>
           </View>
         </View>
 

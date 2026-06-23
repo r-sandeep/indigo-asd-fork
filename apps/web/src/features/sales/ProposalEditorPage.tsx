@@ -10,6 +10,7 @@ import {
 } from './useProposals'
 import { TemplatePickerModal } from './TemplatePickerModal'
 import { ProposalPDFDocument } from './ProposalPDFDocument'
+import { useCompanySettings } from '../settings/useCompanySettings'
 import { getProposalStatusMeta, lineTotal, type ProposalLineItem } from './types'
 import { useToast } from '@/stores/toastStore'
 import { formatMoney } from '@indigo/shared'
@@ -403,6 +404,7 @@ export function ProposalEditorPage() {
   const { data: lead }     = useLead(leadId)
   const { data: proposal, isLoading: propLoading } = useProposal(proposalId)
   const { data: savedItems = [], isLoading: itemsLoading } = useProposalLineItems(proposalId)
+  const { data: branding } = useCompanySettings()
 
   const updateProposal = useUpdateProposal()
   const upsertItems    = useUpsertLineItems()
@@ -537,7 +539,13 @@ export function ProposalEditorPage() {
     try {
       const { pdf } = await import('@react-pdf/renderer')
       const blob = await pdf(
-        <ProposalPDFDocument proposal={proposal} items={savedItems} />
+        <ProposalPDFDocument
+          proposal={proposal}
+          items={savedItems}
+          logoUrl={branding?.logo_url}
+          companyName={branding?.company_name}
+          companyPhone={branding?.company_phone}
+        />
       ).toBlob()
       const url = URL.createObjectURL(blob)
       const a   = document.createElement('a')

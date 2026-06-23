@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MemberRole } from '@indigo/db'
 import type { TeamMember } from '@indigo/shared'
@@ -13,6 +13,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/stores/toastStore'
 import { supabase } from '@/lib/supabase'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { useCompanySettings } from './useCompanySettings'
 import {
   GearIcon,
   UsersIcon,
@@ -22,6 +23,9 @@ import {
   XMarkIcon,
   CheckIcon,
   MagnifyingGlassIcon,
+  BuildingOfficeIcon,
+  PhotoIcon,
+  ArrowUpTrayIcon,
 } from '@/components/ui/Icons'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -597,17 +601,246 @@ function RolesTab() {
   )
 }
 
+// ── Company Tab ────────────────────────────────────────────────────────────────
+
+const MAX_FILE_SIZE = 2 * 1024 * 1024 // 2 MB
+
+function CompanyTab() {
+  const toast    = useToast()
+  const fileRef  = useRef<HTMLInputElement>(null)
+  const { data: settings, isLoading, save, uploadLogo } = useCompanySettings()
+
+  const [logoPreview,    setLogoPreview]    = useState<string | null>(null)
+  const [pendingFile,    setPendingFile]    = useState<File | null>(null)
+  const [companyName,    setCompanyName]    = useState('')
+  const [companyPhone,   setCompanyPhone]   = useState('')
+  const [companyEmail,   setCompanyEmail]   = useState('')
+  const [companyAddress, setCompanyAddress] = useState('')
+  const [isSaving,       setIsSaving]       = useState(false)
+  const [isDragging,     setIsDragging]     = useState(false)
+  const [initialized,    setInitialized]    = useState(false)
+
+  // Populate fields once data loads
+  if (!isLoading && !initialized) {
+    setCompanyName(settings?.company_name    ?? '')
+    setCompanyPhone(settings?.company_phone  ?? '')
+    setCompanyEmail(settings?.company_email  ?? '')
+    setCompanyAddress(settings?.company_address ?? '')
+    setInitialized(true)
+  }
+
+  function acceptFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file (PNG, JPEG, or WebP).')
+      return
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Image must be under 2 MB.')
+      return
+    }
+    setPendingFile(file)
+    setLogoPreview(URL.createObjectURL(file))
+  }
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) acceptFile(file)
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) acceptFile(file)
+  }
+
+  async function handleSave() {
+    setIsSaving(true)
+    try {
+      let logoUrl = settings?.logo_url ?? null
+      if (pendingFile) {
+        logoUrl = await uploadLogo(pendingFile)
+        setPendingFile(null)
+      }
+      await save.mutateAsync({
+        logo_url:        logoUrl,
+        company_name:    companyName.trim()    || null,
+        company_phone:   companyPhone.trim()   || null,
+        company_email:   companyEmail.trim()   || null,
+        company_address: companyAddress.trim() || null,
+      })
+      toast.success('Company settings saved.')
+    } catch (err) {
+      toast.error((err as Error).message ?? 'Save failed.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  function removeLogo() {
+    setLogoPreview(null)
+    setPendingFile(null)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const currentLogo = logoPreview ?? settings?.logo_url ?? null
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-8">
+
+      {/* Logo upload */}
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-700">Company Logo</label>
+        <p className="mb-3 text-xs text-gray-500">
+          Used on proposals and client-facing documents. PNG or JPEG, max 2 MB.
+          Recommended size: 400 × 120 px or wider with a transparent background.
+        </p>
+
+        {currentLogo ? (
+          /* Preview */
+          <div className="flex items-start gap-4">
+            <div className="flex h-20 w-48 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 p-3">
+              <img
+                src={currentLogo}
+                alt="Company logo preview"
+                className="max-h-full max-w-full object-contain"
+              />
+            </div>
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                <ArrowUpTrayIcon className="h-3.5 w-3.5" />
+                Replace
+              </button>
+              <button
+                onClick={removeLogo}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-100 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <XMarkIcon className="h-3.5 w-3.5" />
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Drop zone */
+          <div
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+            className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
+              isDragging
+                ? 'border-brand-400 bg-brand-50'
+                : 'border-gray-200 bg-gray-50 hover:border-brand-300 hover:bg-gray-100'
+            }`}
+          >
+            <PhotoIcon className="h-8 w-8 text-gray-300" />
+            <p className="text-sm font-medium text-gray-600">
+              Drop your logo here, or <span className="text-brand-600">browse</span>
+            </p>
+            <p className="text-xs text-gray-400">PNG · JPEG · WebP · max 2 MB</p>
+          </div>
+        )}
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={onFileChange}
+        />
+      </div>
+
+      {/* Company info fields */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-700">Company Information</h3>
+        <p className="text-xs text-gray-500 -mt-2">
+          Shown on proposals in place of the hardcoded defaults.
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Company Name</label>
+            <input
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="Good Guy Builders"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Phone</label>
+            <input
+              value={companyPhone}
+              onChange={(e) => setCompanyPhone(e.target.value)}
+              placeholder="(866) 466-3489"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Email</label>
+            <input
+              type="email"
+              value={companyEmail}
+              onChange={(e) => setCompanyEmail(e.target.value)}
+              placeholder="info@goodguybuilders.com"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Address</label>
+            <input
+              value={companyAddress}
+              onChange={(e) => setCompanyAddress(e.target.value)}
+              placeholder="123 Main St, City, ST 00000"
+              className={inputCls}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Save */}
+      <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+        {pendingFile && (
+          <p className="text-xs text-amber-600 font-medium">Logo not yet uploaded — click Save to apply.</p>
+        )}
+        <div className="ml-auto">
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60 transition-colors"
+          >
+            {isSaving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+    </div>
+  )
+}
+
 // ── Page Shell ─────────────────────────────────────────────────────────────────
 
-type Tab = 'team' | 'roles'
+type Tab = 'company' | 'team' | 'roles'
 
 const TABS: { id: Tab; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'team',  label: 'Team',  Icon: UsersIcon },
-  { id: 'roles', label: 'Roles', Icon: GearIcon },
+  { id: 'company', label: 'Company', Icon: BuildingOfficeIcon },
+  { id: 'team',    label: 'Team',    Icon: UsersIcon },
+  { id: 'roles',   label: 'Roles',   Icon: GearIcon },
 ]
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('team')
+  const [activeTab, setActiveTab] = useState<Tab>('company')
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
@@ -641,8 +874,9 @@ export function SettingsPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'team'  && <TeamTab />}
-      {activeTab === 'roles' && <RolesTab />}
+      {activeTab === 'company' && <CompanyTab />}
+      {activeTab === 'team'    && <TeamTab />}
+      {activeTab === 'roles'   && <RolesTab />}
     </div>
   )
 }
