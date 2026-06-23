@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useLead } from './useLeads'
 import {
@@ -16,9 +16,7 @@ import {
   ChevronRightIcon,
   PlusIcon,
   TrashIcon,
-  XMarkIcon,
   EyeIcon,
-  ChevronDownIcon,
 } from '@/components/ui/Icons'
 
 // ── Draft line item type (client-side, no DB ids yet) ─────────────────────────
@@ -546,7 +544,6 @@ export function ProposalEditorPage() {
   }
 
   const statusMeta = getProposalStatusMeta(proposal.status)
-  const addressLine = [jobAddress, jobCity, jobState, jobZip].filter(Boolean).join(', ')
 
   return (
     <div className="flex h-full flex-col">

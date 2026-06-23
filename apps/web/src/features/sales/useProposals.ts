@@ -103,7 +103,7 @@ export function useCreateProposal() {
           tenant_id:  activeTenantId!,
           created_by: user?.id,
           status:     'draft',
-        })
+        } as any)
         .select()
         .single()
       if (error) throw error
@@ -120,8 +120,7 @@ export function useUpdateProposal() {
 
   return useMutation({
     mutationFn: async ({ id, ...patch }: Partial<Proposal> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('proposals')
+      const { data, error } = await (supabase.from('proposals') as any)
         .update(patch)
         .eq('id', id)
         .select()
@@ -186,7 +185,7 @@ export function useUpsertLineItems() {
 
       const { data, error } = await supabase
         .from('proposal_line_items')
-        .insert(rows)
+        .insert(rows as any)
         .select()
       if (error) throw error
       return data as ProposalLineItem[]
@@ -210,7 +209,7 @@ export function useCreateTemplate() {
     }) => {
       const { data, error } = await supabase
         .from('proposal_line_item_templates')
-        .insert({ ...input, tenant_id: activeTenantId! })
+        .insert({ ...input, tenant_id: activeTenantId! } as any)
         .select()
         .single()
       if (error) throw error
@@ -228,8 +227,7 @@ export function useUpdateTemplate() {
 
   return useMutation({
     mutationFn: async ({ id, ...patch }: Partial<ProposalLineItemTemplate> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('proposal_line_item_templates')
+      const { data, error } = await (supabase.from('proposal_line_item_templates') as any)
         .update(patch)
         .eq('id', id)
         .select()

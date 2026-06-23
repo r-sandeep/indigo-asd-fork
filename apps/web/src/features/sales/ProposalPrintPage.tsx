@@ -36,7 +36,6 @@ export function ProposalPrintPage() {
 
   const total       = items.reduce((s, it) => s + lineTotal(it), 0)
   const printDate   = new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
-  const addressLine = [proposal.job_address, proposal.job_city, proposal.job_state, proposal.job_zip].filter(Boolean).join('\n')
 
   const showItem  = proposal.col_item
   const showDesc  = proposal.col_description

@@ -84,7 +84,9 @@ export function PortalProposalPage() {
       setLoading(true)
       try {
         // Fetch proposal
-        const { data: propRows, error: propErr } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sb = supabase as any
+        const { data: propRows, error: propErr } = await sb
           .rpc('get_proposal_by_token', { p_token: token })
         if (propErr || !propRows?.length) { setNotFound(true); return }
         const prop = propRows[0] as ProposalData
@@ -95,12 +97,12 @@ export function PortalProposalPage() {
         if (prop.client_email) setSignerEmail(prop.client_email)
 
         // Fetch line items
-        const { data: itemRows, error: itemErr } = await supabase
+        const { data: itemRows, error: itemErr } = await sb
           .rpc('get_proposal_line_items_by_token', { p_token: token })
         if (!itemErr && itemRows) setItems(itemRows as LineItemData[])
 
         // Record view (fire and forget)
-        supabase.rpc('record_proposal_view', { p_token: token }).then(() => {})
+        sb.rpc('record_proposal_view', { p_token: token }).then(() => {})
       } finally {
         setLoading(false)
       }
@@ -114,9 +116,10 @@ export function PortalProposalPage() {
     setIsSigning(true)
     setSignError('')
     try {
-      const { error } = await supabase.rpc('sign_proposal_by_token', {
-        p_token:       token,
-        p_signer_name: signerName.trim(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any).rpc('sign_proposal_by_token', {
+        p_token:        token,
+        p_signer_name:  signerName.trim(),
         p_signer_email: signerEmail.trim() || '',
       })
       if (error) throw error

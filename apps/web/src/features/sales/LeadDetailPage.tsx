@@ -15,7 +15,6 @@ import {
   LEAD_STATUSES,
   LEAD_SOURCES,
   ACTIVITY_TYPES,
-  getLeadStatusMeta,
   getProposalStatusMeta,
   type LeadStatus,
   type ActivityType,
@@ -27,7 +26,6 @@ import {
   TrashIcon,
   PencilIcon,
   XMarkIcon,
-  CheckIcon,
 } from '@/components/ui/Icons'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -246,8 +244,6 @@ export function LeadDetailPage() {
     return <div className="p-8 text-sm text-gray-500">Lead not found.</div>
   }
 
-  const meta = getLeadStatusMeta(lead.status)
-
   async function handleStatusChange(status: LeadStatus) {
     await updateStatus.mutateAsync({ id, status })
   }
@@ -266,7 +262,7 @@ export function LeadDetailPage() {
   }
 
   async function handleNewProposal() {
-    const addressParts = [lead.job_address, lead.job_city, lead.job_state].filter(Boolean).join(', ')
+    if (!lead) return
     const p = await createProposal.mutateAsync({
       lead_id:     id,
       title:       lead.title,

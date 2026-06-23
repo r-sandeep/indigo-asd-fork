@@ -91,7 +91,7 @@ export function useCreateLead() {
           tenant_id:  activeTenantId!,
           created_by: user?.id,
           status:     'new',
-        })
+        } as any)
         .select()
         .single()
       if (error) throw error
@@ -109,8 +109,7 @@ export function useUpdateLead() {
 
   return useMutation({
     mutationFn: async ({ id, ...patch }: Partial<Lead> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('leads')
+      const { data, error } = await (supabase.from('leads') as any)
         .update(patch)
         .eq('id', id)
         .select()
@@ -135,8 +134,7 @@ export function useUpdateLeadStatus() {
       if (status === 'won')  patch.won_date  = new Date().toISOString().split('T')[0]
       if (status === 'lost') patch.lost_date = new Date().toISOString().split('T')[0]
 
-      const { data, error } = await supabase
-        .from('leads')
+      const { data, error } = await (supabase.from('leads') as any)
         .update(patch)
         .eq('id', id)
         .select()
@@ -183,7 +181,7 @@ export function useAddActivity() {
           tenant_id:  activeTenantId!,
           created_by: user?.id,
           activity_date: input.activity_date ?? new Date().toISOString(),
-        })
+        } as any)
         .select()
         .single()
       if (error) throw error

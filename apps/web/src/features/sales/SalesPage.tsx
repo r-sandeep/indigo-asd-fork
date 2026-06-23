@@ -14,7 +14,6 @@ import {
 import {
   PlusIcon,
   MagnifyingGlassIcon,
-  CurrencyDollarIcon,
   ChevronRightIcon,
 } from '@/components/ui/Icons'
 
@@ -50,7 +49,6 @@ function LeadCard({
   lead: Lead
   onDragStart: (id: string) => void
 }) {
-  const meta     = getLeadStatusMeta(lead.status)
   const overdue  = isOverdue(lead.follow_up_date)
   const relDate  = formatRelativeDate(lead.follow_up_date)
 
@@ -116,7 +114,6 @@ function KanbanColumn({
   onDragOver: () => void
   onDragLeave: () => void
 }) {
-  const meta       = getLeadStatusMeta(status)
   const totalValue = leads.reduce((s, l) => s + (l.estimated_value_cents ?? 0), 0)
 
   const columnAccent: Record<LeadStatus, string> = {
