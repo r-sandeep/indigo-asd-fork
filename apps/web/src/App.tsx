@@ -28,6 +28,12 @@ import { PortalLoginPage } from '@/features/portal/PortalLoginPage'
 import { PortalShell } from '@/features/portal/PortalShell'
 import { PortalProjectsPage } from '@/features/portal/PortalProjectsPage'
 import { PortalProjectPage } from '@/features/portal/PortalProjectPage'
+import { PortalProposalPage } from '@/features/portal/PortalProposalPage'
+import { SalesPage } from '@/features/sales/SalesPage'
+import { LeadDetailPage } from '@/features/sales/LeadDetailPage'
+import { ProposalEditorPage } from '@/features/sales/ProposalEditorPage'
+import { ProposalPrintPage } from '@/features/sales/ProposalPrintPage'
+import { TemplatesPage } from '@/features/sales/TemplatesPage'
 
 // ── Roles restricted to projects-only view ────────────────────────────────
 
@@ -111,6 +117,13 @@ function AuthRoutes() {
         <Route path="employees"        element={<EmployeesPage />} />
         <Route path="subcontractors"  element={<SubcontractorsPage />} />
         <Route path="settings"         element={<SettingsPage />} />
+
+        {/* Sales pipeline */}
+        <Route path="sales"                                                      element={<SalesPage />} />
+        <Route path="sales/templates"                                            element={<TemplatesPage />} />
+        <Route path="sales/leads/:id"                                            element={<LeadDetailPage />} />
+        <Route path="sales/leads/:id/proposals/:proposalId"                      element={<ProposalEditorPage />} />
+        <Route path="sales/leads/:id/proposals/:proposalId/preview"             element={<ProposalPrintPage />} />
         <Route path="schedule"        element={<ComingSoon name="Schedule" />} />
         <Route path="financials/*"    element={<ComingSoon name="Financials" />} />
         <Route path="documents"       element={<ComingSoon name="Documents" />} />
@@ -163,6 +176,8 @@ function PortalRoutes() {
         path="login"
         element={user ? <Navigate to="/portal" replace /> : <PortalLoginPage />}
       />
+      {/* Public proposal view — no auth required, access via token */}
+      <Route path="proposals/:token" element={<PortalProposalPage />} />
       <Route
         element={
           <RequirePortalAuth>

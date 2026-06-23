@@ -15,6 +15,7 @@ import {
   GearIcon,
   XMarkIcon,
   TableCellsIcon,
+  FunnelIcon,
 } from '@/components/ui/Icons'
 
 interface NavItem {
@@ -28,6 +29,7 @@ interface NavItem {
 const ALL_NAV_ITEMS: NavItem[] = [
   { to: '/',               label: 'Dashboard',      Icon: HomeIcon,      end: true },
   { to: '/projects',       label: 'Projects',        Icon: FolderIcon },
+  { to: '/sales',          label: 'Sales',           Icon: FunnelIcon },
   { to: '/schedule',       label: 'Schedule',        Icon: CalendarIcon },
   { to: '/financials',     label: 'Financials',      Icon: ChartBarIcon },
   { to: '/documents',      label: 'Documents',       Icon: DocumentIcon },
