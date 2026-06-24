@@ -192,10 +192,10 @@ export function PortalProposalPage() {
 
       {/* Document card */}
       <div className="mx-auto max-w-3xl rounded-2xl bg-white shadow-xl print:shadow-none print:rounded-none">
-        <div className="px-12 py-10 text-[13px] text-gray-900">
+        <div className="px-4 py-6 sm:px-8 md:px-12 md:py-10 text-[13px] text-gray-900">
 
           {/* ── Header ─────────────────────────────────────────────── */}
-          <div className="flex items-start justify-between mb-8">
+          <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
             <div className="flex items-center gap-3">
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-900 text-white font-bold text-2xl select-none">
                 GGB
@@ -205,7 +205,7 @@ export function PortalProposalPage() {
                 <p className="text-xs font-semibold tracking-[0.25em] text-gray-700">—BUILDERS—</p>
               </div>
             </div>
-            <div className="text-right text-sm text-gray-600">
+            <div className="text-sm text-gray-600 sm:text-right">
               <p>Phone: (866) 466-3489</p>
             </div>
           </div>
@@ -250,7 +250,8 @@ export function PortalProposalPage() {
           )}
 
           {/* ── Line items table ─────────────────────────────────── */}
-          <table className="w-full border-collapse text-sm" style={{ borderTop: '1px solid #e5e7eb' }}>
+          <div className="overflow-x-auto -mx-4 sm:-mx-8 md:-mx-12 px-4 sm:px-8 md:px-12">
+          <table className="w-full min-w-[400px] border-collapse text-sm" style={{ borderTop: '1px solid #e5e7eb' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
                 {proposal.col_item        && <th className="px-4 py-3 text-left font-semibold text-gray-800 w-44">Items</th>}
@@ -275,6 +276,7 @@ export function PortalProposalPage() {
               })}
             </tbody>
           </table>
+          </div>
 
           {/* ── Total ───────────────────────────────────────────── */}
           <div className="mt-6 flex justify-end" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '1.5rem' }}>
@@ -312,7 +314,7 @@ export function PortalProposalPage() {
                 </p>
 
                 {!showSignForm ? (
-                  <div className="grid grid-cols-3 gap-8 print:grid">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-8 print:grid print:grid-cols-3">
                     {['Signature', 'Date', 'Print Name'].map((label) => (
                       <div key={label}>
                         <p className="mb-2 text-sm font-semibold text-gray-800">{label}:</p>

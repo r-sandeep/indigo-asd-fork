@@ -182,7 +182,18 @@ function LeadRow({ lead }: { lead: Lead }) {
         <p className="text-sm font-semibold text-gray-900 group-hover:text-brand-700 transition-colors">
           {lead.title}
         </p>
-        <p className="mt-0.5 text-xs text-gray-500">{lead.client_name}</p>
+        <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+          <p className="text-xs text-gray-500">{lead.client_name}</p>
+          {/* Status + value visible on mobile only */}
+          <span className={`sm:hidden inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium ${meta.color}`}>
+            {meta.label}
+          </span>
+          {lead.estimated_value_cents != null && (
+            <span className="sm:hidden text-xs font-semibold tabular-nums text-gray-700">
+              {formatMoney(lead.estimated_value_cents)}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="hidden sm:flex items-center gap-5 shrink-0">

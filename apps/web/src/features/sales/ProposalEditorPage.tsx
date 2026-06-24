@@ -166,8 +166,8 @@ function LineItemsTable({
 
   return (
     <div>
-      <div className="overflow-hidden rounded-xl border border-gray-200">
-        <table className="w-full border-collapse">
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full min-w-[480px] border-collapse">
           <thead>
             <tr>
               <th className={`${thCls} w-8`} />
@@ -580,29 +580,39 @@ export function ProposalEditorPage() {
   return (
     <div className="flex h-full flex-col">
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-5 py-3 lg:px-8">
-        {/* Breadcrumb */}
-        <div className="flex min-w-0 items-center gap-1.5 text-sm text-gray-500">
-          <Link to="/sales" className="hover:text-brand-600 transition-colors whitespace-nowrap">Sales</Link>
-          <ChevronRightIcon className="h-3 w-3 shrink-0" strokeWidth={2} />
-          <Link to={`/sales/leads/${leadId}`} className="hover:text-brand-600 transition-colors truncate max-w-[120px]">
-            {lead?.title ?? 'Lead'}
-          </Link>
-          <ChevronRightIcon className="h-3 w-3 shrink-0" strokeWidth={2} />
-          <span className="truncate font-medium text-gray-900">{title || 'Proposal'}</span>
+      <div className="shrink-0 border-b border-gray-200 bg-white px-5 py-3 lg:px-8">
+        <div className="flex items-center justify-between gap-3">
+          {/* Breadcrumb */}
+          <div className="flex min-w-0 items-center gap-1.5 text-sm text-gray-500">
+            <Link to="/sales" className="hover:text-brand-600 transition-colors whitespace-nowrap hidden sm:inline">Sales</Link>
+            <ChevronRightIcon className="h-3 w-3 shrink-0 hidden sm:block" strokeWidth={2} />
+            <Link to={`/sales/leads/${leadId}`} className="hover:text-brand-600 transition-colors truncate max-w-[100px] sm:max-w-[160px]">
+              {lead?.title ?? 'Lead'}
+            </Link>
+            <ChevronRightIcon className="h-3 w-3 shrink-0" strokeWidth={2} />
+            <span className="truncate font-medium text-gray-900 max-w-[120px] sm:max-w-none">{title || 'Proposal'}</span>
+          </div>
+
+          {/* Always-visible: status + save */}
+          <div className="flex shrink-0 items-center gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusMeta.color}`}>
+              {statusMeta.label}
+            </span>
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60 transition-colors"
+            >
+              {isSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusMeta.color}`}>
-            {statusMeta.label}
-          </span>
-
+        {/* Secondary actions row — wraps on small screens */}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {isDirty && (
             <span className="text-xs text-amber-600 font-medium">Unsaved changes</span>
           )}
-
-          {/* Copy portal link */}
           {portalUrl && (
             <button
               onClick={copyPortalLink}
@@ -611,8 +621,6 @@ export function ProposalEditorPage() {
               Copy Client Link
             </button>
           )}
-
-          {/* Download PDF */}
           <button
             onClick={handleDownloadPDF}
             disabled={isPdfGenerating}
@@ -620,8 +628,6 @@ export function ProposalEditorPage() {
           >
             {isPdfGenerating ? 'Generating…' : 'Download PDF'}
           </button>
-
-          {/* Preview */}
           <Link
             to={`/sales/leads/${leadId}/proposals/${proposalId}/preview`}
             target="_blank"
@@ -630,8 +636,6 @@ export function ProposalEditorPage() {
             <EyeIcon className="h-3.5 w-3.5" />
             Preview
           </Link>
-
-          {/* Mark sent */}
           {proposal.status === 'draft' && (
             <button
               onClick={handleMarkSent}
@@ -640,14 +644,6 @@ export function ProposalEditorPage() {
               Mark Sent
             </button>
           )}
-
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-60 transition-colors"
-          >
-            {isSaving ? 'Saving…' : 'Save'}
-          </button>
         </div>
       </div>
 
@@ -677,7 +673,7 @@ export function ProposalEditorPage() {
           {/* Client info */}
           <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Client Info</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs text-gray-500">Client Name</label>
                 <input
@@ -776,7 +772,7 @@ export function ProposalEditorPage() {
             <p className="mb-4 text-sm text-gray-600 italic">
               I confirm that my action here represents my electronic signature and is binding.
             </p>
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
               {(['Signature', 'Date', 'Print Name'] as const).map((label) => (
                 <div key={label}>
                   <p className="mb-1 text-xs font-medium text-gray-500">{label}</p>

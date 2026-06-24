@@ -231,6 +231,7 @@ export function LeadDetailPage() {
   const [noteType,    setNoteType]    = useState<ActivityType>('note')
   const [noteText,    setNoteText]    = useState('')
   const [showDelete,  setShowDelete]  = useState(false)
+  const [mobileTab,   setMobileTab]   = useState<'activity' | 'details'>('activity')
 
   if (isLoading) {
     return (
@@ -290,9 +291,35 @@ export function LeadDetailPage() {
         </div>
       </div>
 
+      {/* Mobile tab switcher — hidden on lg+ where both panes show side-by-side */}
+      <div className="flex shrink-0 border-b border-gray-200 bg-white lg:hidden">
+        {(['activity', 'details'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setMobileTab(tab)}
+            className={`flex-1 py-3 text-sm font-medium transition-colors ${
+              mobileTab === tab
+                ? 'border-b-2 border-brand-600 text-brand-700'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab === 'activity' ? 'Activity' : (
+              <>
+                Details &amp; Proposals
+                {proposals.length > 0 && (
+                  <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500">
+                    {proposals.length}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-1 overflow-hidden">
         {/* ── Left: Activity feed ────────────────────────────────────── */}
-        <div className="flex flex-1 flex-col overflow-y-auto p-5 lg:p-8">
+        <div className={`${mobileTab === 'activity' ? 'flex' : 'hidden'} lg:flex flex-1 flex-col overflow-y-auto p-5 lg:p-8`}>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">Activity</h2>
             <button
@@ -376,8 +403,9 @@ export function LeadDetailPage() {
           )}
         </div>
 
-        {/* ── Right: Lead info sidebar ────────────────────────────────── */}
-        <div className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-white lg:flex">
+        {/* ── Right: Lead info + proposals ────────────────────────────── */}
+        {/* On mobile: full-width panel toggled by tab. On lg+: fixed 320px sidebar. */}
+        <div className={`${mobileTab === 'details' ? 'flex' : 'hidden'} lg:flex w-full lg:w-80 lg:shrink-0 flex-col overflow-y-auto border-t lg:border-t-0 lg:border-l border-gray-200 bg-white`}>
           <div className="p-5">
             {/* Title + actions */}
             <div className="flex items-start justify-between gap-2 mb-4">
