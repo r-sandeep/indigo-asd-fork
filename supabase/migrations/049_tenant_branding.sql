@@ -49,38 +49,33 @@ values (
 on conflict (id) do nothing;
 
 -- Authenticated users may upload into their own tenant folder only
-create policy "tenant members upload assets" on storage.objects
+create policy "tenant-assets insert" on storage.objects
   for insert to authenticated
   with check (
     bucket_id = 'tenant-assets'
-    and (storage.foldername(name))[1] in (
-      select id::text from tenants
-      where id in (select get_user_tenant_ids())
-    )
+    and (storage.foldername(name))[1]::uuid in (select get_user_tenant_ids())
   );
 
 -- Authenticated users may replace/update objects in their tenant folder
-create policy "tenant members update assets" on storage.objects
+create policy "tenant-assets update" on storage.objects
   for update to authenticated
   using (
     bucket_id = 'tenant-assets'
-    and (storage.foldername(name))[1] in (
-      select id::text from tenants
-      where id in (select get_user_tenant_ids())
-    )
+    and (storage.foldername(name))[1]::uuid in (select get_user_tenant_ids())
+  )
+  with check (
+    bucket_id = 'tenant-assets'
+    and (storage.foldername(name))[1]::uuid in (select get_user_tenant_ids())
   );
 
 -- Authenticated users may delete objects in their tenant folder
-create policy "tenant members delete assets" on storage.objects
+create policy "tenant-assets delete" on storage.objects
   for delete to authenticated
   using (
     bucket_id = 'tenant-assets'
-    and (storage.foldername(name))[1] in (
-      select id::text from tenants
-      where id in (select get_user_tenant_ids())
-    )
+    and (storage.foldername(name))[1]::uuid in (select get_user_tenant_ids())
   );
 
 -- Anyone (including the PDF renderer) can read public bucket objects
-create policy "public read tenant assets" on storage.objects
+create policy "tenant-assets select" on storage.objects
   for select using (bucket_id = 'tenant-assets');
