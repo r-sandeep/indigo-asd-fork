@@ -42,7 +42,7 @@ const FIELD_ROLES = new Set(['field_associate', 'field_super', 'subcontractor'])
 // ── Staff auth guard ───────────────────────────────────────────────────────
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, isLoading, profile, tenantMemberships, hasFetchedMemberships } = useAuth()
+  const { user, isLoading, tenantMemberships, hasFetchedMemberships } = useAuth()
   if (isLoading) return null          // session check in-flight — hold position
   if (user === null) return <Navigate to="/login" replace />
 
@@ -76,12 +76,21 @@ function AuthRoutes() {
 
   // When a user clicks an invite email link, Supabase appends #type=invite
   // (plus access_token, refresh_token, etc.) to the redirect_to URL.
-  // The redirect_to is now the site root so the invite lands here on /*,
-  // not on /welcome directly. Forward to /welcome with the hash intact so
-  // that Supabase's detectSessionInUrl can still find the tokens and
-  // establish the session before WelcomePage checks for a user.
+  // If the redirect_to path isn't honoured (e.g. misconfiguration fallback),
+  // the invite lands here on /*. Decode the JWT to detect portal invites
+  // (they carry customer_id in user_metadata) and route them to /portal;
+  // staff invites go to /welcome. The hash is forwarded intact so
+  // detectSessionInUrl can establish the session before the target page loads.
   const isInviteFlow = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('type') === 'invite'
-  if (isInviteFlow) return <Navigate to={'/welcome' + window.location.hash} replace />
+  if (isInviteFlow) {
+    const token = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('access_token')
+    let isPortalInvite = false
+    try {
+      const payload = JSON.parse(atob(token!.split('.')[1]))
+      isPortalInvite = !!payload?.user_metadata?.customer_id
+    } catch { /* malformed JWT — treat as staff invite */ }
+    return <Navigate to={(isPortalInvite ? '/portal' : '/welcome') + window.location.hash} replace />
+  }
 
   const activeMembership = tenantMemberships.find((m) => m.tenant_id === activeTenantId)
   const isFieldRole = FIELD_ROLES.has(activeMembership?.role ?? '')
