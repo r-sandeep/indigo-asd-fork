@@ -36,22 +36,15 @@ begin
      where id = p_co_id
        and (co_status = 'pending_approval' or (co_status is null and status = 'Pending'))
      for update
-  ),
-  upd as (
-    update job_change_orders j
-       set co_status = 'approved',
-           approved_at = now(),
-           approved_by_user_id = auth.uid()
-      from old_row
-     where j.id = old_row.oid
-     returning old_row.job_id, old_row.tenant_id, old_row.old_row
   )
+  -- Read the locked row first so we can authorize the caller before mutating
   select job_id, tenant_id, old_row
     into v_job_id, v_tenant_id, v_old_row
-    from upd;
+    from old_row;
 
   if not found then
-    raise exception 'Change order not found or not pending client approval';
+    -- Not pending client approval (or not found); be a no-op to mirror PM behavior
+    return;
   end if;
 
   -- is_client_on_job() handles both primary and secondary portal contacts
@@ -59,13 +52,27 @@ begin
     raise exception 'Not authorized to approve this change order';
   end if;
 
-  update job_change_orders
-     set co_status            = 'approved',
-         approved_at          = now(),
-         approved_by_user_id  = auth.uid()
-   where id = p_co_id;
+  -- Perform the update only if not already approved, using the locked row to avoid
+  -- concurrent duplicate audits (mirror the guarded pattern used by PM approvals).
+  with upd as (
+    update job_change_orders j
+       set co_status = 'approved',
+           approved_at = now(),
+           approved_by_user_id = auth.uid()
+      from old_row
+     where j.id = old_row.oid
+       and (j.co_status is distinct from 'approved')
+     returning old_row.job_id, old_row.tenant_id, old_row.old_row
+  )
+  select job_id, tenant_id, old_row
+    into v_job_id, v_tenant_id, v_old_row
+    from upd;
 
-  -- Write audit log entry
+  if not found then
+    -- already approved or a no-op; do nothing
+    return;
+  end if;
+
   -- Write audit log entry using the locked/updated old_row; use auth.uid() as the acting user id
   insert into audit_log (tenant_id, user_id, table_name, record_id, action, old_values, new_values)
   select v_tenant_id,
