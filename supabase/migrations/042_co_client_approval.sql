@@ -16,11 +16,15 @@ returns void language plpgsql security definer as $$
 declare
   v_job_id uuid;
 begin
-  -- Find the CO and verify it is pending client approval
-  select job_id into v_job_id
-    from job_change_orders
-   where id        = p_co_id
-     and co_status = 'pending_approval';
+  -- Atomically find & lock the CO and accept both Indigo pending rows and legacy BB rows
+  with old_row as (
+    select job_id, id as oid
+      from job_change_orders
+     where id = p_co_id
+       and (co_status = 'pending_approval' or (co_status is null and status = 'Pending'))
+     for update
+  )
+  select job_id into v_job_id from old_row;
 
   if not found then
     raise exception 'Change order not found or not pending client approval';
