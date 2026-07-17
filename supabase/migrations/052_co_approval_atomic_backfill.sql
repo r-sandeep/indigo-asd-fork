@@ -83,7 +83,7 @@ begin
          p_co_id,
          'update',
          v_old_row,
-         v_new_row
+         v_new_row || jsonb_build_object('_approved_via', 'portal')
     from user_profiles up
    where up.id = auth.uid()
    limit 1;
@@ -145,7 +145,7 @@ begin
          p_co_id,
          'update',
          v_old_row,
-         v_new_row
+         v_new_row || jsonb_build_object('_approved_via', 'pm')
     from user_profiles up
    where up.id = auth.uid()
    limit 1;
