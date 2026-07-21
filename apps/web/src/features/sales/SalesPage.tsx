@@ -16,28 +16,12 @@ import {
   MagnifyingGlassIcon,
   ChevronRightIcon,
 } from '@/components/ui/Icons'
+import { formatRelativeFollowUpDate, isFollowUpOverdue } from './followUpDate'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function stageLabel(status: LeadStatus): string {
   return LEAD_STATUSES.find((s) => s.value === status)?.label ?? status
-}
-
-function isOverdue(dateStr: string | null): boolean {
-  if (!dateStr) return false
-  return new Date(dateStr) < new Date()
-}
-
-function formatRelativeDate(dateStr: string | null): string | null {
-  if (!dateStr) return null
-  const d    = new Date(dateStr + 'T00:00:00')
-  const now  = new Date()
-  const diff = Math.round((d.getTime() - now.getTime()) / 86400000)
-  if (diff === 0)  return 'Today'
-  if (diff === 1)  return 'Tomorrow'
-  if (diff === -1) return 'Yesterday'
-  if (diff < -1)   return `${Math.abs(diff)}d overdue`
-  return `In ${diff}d`
 }
 
 // ── Lead card ────────────────────────────────────────────────────────────────
@@ -49,8 +33,8 @@ function LeadCard({
   lead: Lead
   onDragStart: (id: string) => void
 }) {
-  const overdue  = isOverdue(lead.follow_up_date)
-  const relDate  = formatRelativeDate(lead.follow_up_date)
+  const overdue  = isFollowUpOverdue(lead.follow_up_date)
+  const relDate  = formatRelativeFollowUpDate(lead.follow_up_date)
 
   return (
     <div
@@ -170,8 +154,8 @@ function KanbanColumn({
 
 function LeadRow({ lead }: { lead: Lead }) {
   const meta    = getLeadStatusMeta(lead.status)
-  const overdue = isOverdue(lead.follow_up_date)
-  const relDate = formatRelativeDate(lead.follow_up_date)
+  const overdue = isFollowUpOverdue(lead.follow_up_date)
+  const relDate = formatRelativeFollowUpDate(lead.follow_up_date)
 
   return (
     <Link
