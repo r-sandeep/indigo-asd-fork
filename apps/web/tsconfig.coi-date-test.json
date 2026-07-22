@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./.tmp-tests",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "allowImportingTsExtensions": false,
+    "noEmit": false
+  },
+  "include": [
+    "src/features/projects/tabs/subsCoiDate.ts"
+  ]
+}

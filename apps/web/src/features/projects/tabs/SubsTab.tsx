@@ -5,6 +5,12 @@ import { formatMoney } from '@indigo/shared'
 import { useProjectSubcontracts, useProjectLienWaivers } from '../useProject'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExclamationTriangleIcon } from '@/components/ui/Icons'
+import {
+  formatDateOnlyLocal,
+  formatGenericLocal,
+  isDateOnlyExpiredLocal,
+  isDateOnlyExpiringSoonLocal,
+} from './subsCoiDate'
 
 interface OutletCtx {
   project: ProjectRow | undefined
@@ -14,22 +20,19 @@ interface OutletCtx {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string | null | undefined): string {
-  if (!s) return '—'
-  return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  return formatDateOnlyLocal(s)
+}
+
+function fmtGenericDate(s: string | null | undefined): string {
+  return formatGenericLocal(s)
 }
 
 function isExpiringSoon(dateStr: string | null | undefined, daysAhead = 30): boolean {
-  if (!dateStr) return false
-  const d = new Date(dateStr)
-  const now = new Date()
-  const cutoff = new Date()
-  cutoff.setDate(now.getDate() + daysAhead)
-  return d >= now && d <= cutoff
+  return isDateOnlyExpiringSoonLocal(dateStr, daysAhead)
 }
 
 function isExpired(dateStr: string | null | undefined): boolean {
-  if (!dateStr) return false
-  return new Date(dateStr) < new Date()
+  return isDateOnlyExpiredLocal(dateStr)
 }
 
 // ── Status configs ─────────────────────────────────────────────────────────
@@ -188,7 +191,7 @@ function LienWaiversSection({ waivers }: { waivers: ProjectLienWaiver[] }) {
               <div className="shrink-0 text-right">
                 <p className="text-sm font-semibold tabular-nums text-gray-800">{formatMoney(w.amount_cents)}</p>
                 {w.received_at ? (
-                  <p className="text-xs text-green-600">✓ Received {fmtDate(w.received_at)}</p>
+                  <p className="text-xs text-green-600">✓ Received {fmtGenericDate(w.received_at)}</p>
                 ) : (
                   <p className="text-xs text-amber-600">Pending</p>
                 )}
