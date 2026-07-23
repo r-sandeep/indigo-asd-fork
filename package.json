@@ -9,6 +9,7 @@
     "build": "pnpm --filter web build",
     "build:portal": "pnpm --filter portal build",
     "build:all": "pnpm -r build",
+    "test:coi-date": "pnpm --filter web exec tsc -p tsconfig.coi-date-test.json && node apps/web/tests/subsCoiDate.test.mjs && rm -rf apps/web/.tmp-tests",
     "type-check": "pnpm -r type-check",
     "lint": "pnpm -r lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .prettierignore"
