@@ -28,16 +28,18 @@ declare
   v_tenant_id uuid;
   v_old_row   jsonb;
 begin
-  -- Find the CO and verify it is pending client approval
-  select job_id, tenant_id,
-         to_jsonb(job_change_orders.*) - 'id'
+  -- Atomically find & lock the CO row and verify it is pending client approval
+  -- Accept both Indigo pending rows and legacy BB rows (co_status IS NULL and status = 'Pending')
+  select job_id, tenant_id, to_jsonb(job_change_orders.*) - 'id'
     into v_job_id, v_tenant_id, v_old_row
     from job_change_orders
-   where id        = p_co_id
-     and co_status = 'pending_approval';
+   where id = p_co_id
+     and (co_status = 'pending_approval' or (co_status is null and status = 'Pending'))
+   for update;
 
   if not found then
-    raise exception 'Change order not found or not pending client approval';
+    -- Not pending client approval (or not found); be a no-op to mirror PM behavior
+    return;
   end if;
 
   -- is_client_on_job() handles both primary and secondary portal contacts
@@ -51,10 +53,10 @@ begin
          approved_by_user_id  = auth.uid()
    where id = p_co_id;
 
-  -- Write audit log entry
+  -- Write audit log entry using the locked/updated old_row; use auth.uid() as the acting user id
   insert into audit_log (tenant_id, user_id, table_name, record_id, action, old_values, new_values)
   select v_tenant_id,
-         up.id,
+         auth.uid(),
          'job_change_orders',
          p_co_id,
          'update',
@@ -64,10 +66,7 @@ begin
            'approved_at',         now(),
            'approved_by_user_id', auth.uid(),
            '_approved_via',       'portal'
-         )
-    from user_profiles up
-   where up.auth_user_id = auth.uid()
-   limit 1;
+         );
 end;
 $$;
 
@@ -80,37 +79,41 @@ declare
   v_tenant_id uuid;
   v_old_row   jsonb;
 begin
-  -- Find the CO
-  select job_id, tenant_id,
-         to_jsonb(job_change_orders.*) - 'id'
+  -- Atomically find & lock the CO row
+  select job_id, tenant_id, to_jsonb(job_change_orders.*) - 'id'
     into v_job_id, v_tenant_id, v_old_row
     from job_change_orders
-   where id = p_co_id;
+   where id = p_co_id
+   for update;
 
   if not found then
     raise exception 'Change order not found';
   end if;
 
-  -- Verify caller is a PM+ member of the tenant
+  -- Verify caller is a PM+ member of the tenant (use auth.uid() mapped to user_profiles.id)
   if not exists (
     select 1 from tenant_members
-     where user_id   = (select id from user_profiles where auth_user_id = auth.uid() limit 1)
+     where user_id   = auth.uid()
        and tenant_id = v_tenant_id
        and role in ('project_manager', 'admin', 'owner')
   ) then
     raise exception 'PM+ role required to approve change orders';
   end if;
 
+  if v_old_row ->> 'co_status' = 'approved' then
+    return;
+  end if;
+
   update job_change_orders
-     set co_status           = 'approved',
-         approved_at         = now(),
-         approved_by_user_id = auth.uid()
+     set co_status            = 'approved',
+         approved_at          = now(),
+         approved_by_user_id  = auth.uid()
    where id = p_co_id;
 
   -- Write audit log entry
   insert into audit_log (tenant_id, user_id, table_name, record_id, action, old_values, new_values)
   select v_tenant_id,
-         up.id,
+         auth.uid(),
          'job_change_orders',
          p_co_id,
          'update',
@@ -120,9 +123,6 @@ begin
            'approved_at',         now(),
            'approved_by_user_id', auth.uid(),
            '_approved_via',       'pm'
-         )
-    from user_profiles up
-   where up.auth_user_id = auth.uid()
-   limit 1;
+         );
 end;
 $$;
