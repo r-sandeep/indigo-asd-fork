@@ -64,6 +64,8 @@ export interface ProjectMilestone {
   triggers_draw_request: boolean
   triggers_invoice: boolean
   invoice_amount_cents: number | null
+  predecessor_id: string | null
+  lag_days: number
 }
 
 export interface ProjectPhase {
@@ -259,6 +261,79 @@ export interface ProjectDocument {
   updated_at: string
 }
 
+const PROJECT_DOCUMENT_BUCKET = 'project-documents'
+const MAX_PROJECT_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024
+const PROJECT_DOCUMENT_SIGNED_URL_EXPIRY = 3_600
+
+export interface UploadProjectDocumentInput {
+  folderId?: string | null
+  type: string
+  description?: string | null
+  isClientVisible?: boolean
+  tags?: string[]
+}
+
+export interface ProjectDocumentDownload {
+  documentId: string
+  fileName: string
+  signedUrl: string
+}
+
+interface NormalizedUploadProjectDocumentInput {
+  folderId: string | null
+  type: string
+  description: string | null
+  isClientVisible: boolean
+  tags: string[]
+}
+
+function getSafeProjectDocumentExtension(fileName: string): string {
+  const normalizedFileName = fileName.split(/[\\/]/).pop()?.trim() ?? ''
+  const extensionMatch = normalizedFileName.match(/\.([a-z0-9]{1,16})$/i)
+  const rawExtension = extensionMatch?.[1]?.toLowerCase() ?? ''
+  const extension = rawExtension.replace(/[^a-z0-9]/g, '')
+  if (!extension || extension.length > 16) return ''
+  return `.${extension}`
+}
+
+function buildProjectDocumentStoragePath(
+  tenantId: string,
+  projectId: string,
+  fileName: string,
+): string {
+  const extension = getSafeProjectDocumentExtension(fileName)
+  return `${tenantId}/projects/${projectId}/documents/${crypto.randomUUID()}${extension}`
+}
+
+function assertValidProjectDocumentFile(file: File): void {
+  if (file.size <= 0) {
+    throw new Error('Document file is required.')
+  }
+  if (file.size > MAX_PROJECT_DOCUMENT_SIZE_BYTES) {
+    throw new Error('Document files must be 25 MiB or smaller.')
+  }
+}
+
+function normalizeUploadProjectDocumentInput(
+  input: UploadProjectDocumentInput,
+): NormalizedUploadProjectDocumentInput {
+  const type = input.type.trim()
+  if (!type) {
+    throw new Error('Document category is required.')
+  }
+
+  const description = input.description?.trim() ?? ''
+  const tags = (input.tags ?? []).map((tag) => tag.trim()).filter(Boolean)
+
+  return {
+    folderId: input.folderId ?? null,
+    type,
+    description: description || null,
+    isClientVisible: input.isClientVisible ?? false,
+    tags,
+  }
+}
+
 // ── Phases + milestones ────────────────────────────────────────────────────
 
 export async function getProjectPhases(
@@ -295,7 +370,9 @@ export async function getProjectPhases(
         requires_client_approval,
         triggers_draw_request,
         triggers_invoice,
-        invoice_amount_cents
+        invoice_amount_cents,
+        predecessor_id,
+        lag_days
       )
     `)
     .eq('project_id', projectId)
@@ -556,6 +633,116 @@ export async function getProjectDocuments(
   return {
     folders:   (foldersRes.data ?? []) as ProjectDocumentFolder[],
     documents: (docsRes.data ?? []) as ProjectDocument[],
+  }
+}
+
+export async function uploadProjectDocument(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  userId: string,
+  file: File,
+  input: UploadProjectDocumentInput,
+): Promise<ProjectDocument> {
+  assertValidProjectDocumentFile(file)
+  const normalizedInput = normalizeUploadProjectDocumentInput(input)
+
+  const storagePath = buildProjectDocumentStoragePath(tenantId, projectId, file.name)
+
+  const { error: uploadError } = await client.storage
+    .from(PROJECT_DOCUMENT_BUCKET)
+    .upload(storagePath, file, { upsert: false })
+  if (uploadError) throw uploadError
+
+  const { data: document, error: documentError } = await client
+    .from('documents')
+    .insert({
+      tenant_id: tenantId,
+      project_id: projectId,
+      folder_id: normalizedInput.folderId,
+      type: normalizedInput.type,
+      name: file.name,
+      description: normalizedInput.description,
+      mime_type: file.type || null,
+      file_size_bytes: file.size,
+      version: 1,
+      is_client_visible: normalizedInput.isClientVisible,
+      tags: normalizedInput.tags,
+      uploaded_by: userId,
+      storage_bucket: PROJECT_DOCUMENT_BUCKET,
+      storage_path: storagePath,
+    } as unknown as never)
+    .select(`
+      id, folder_id, type, name, description, mime_type,
+      file_size_bytes, version, is_client_visible, tags,
+      uploaded_by, created_at, updated_at
+    `)
+    .single()
+
+  if (documentError) {
+    await rollbackProjectDocumentUpload(client, storagePath, documentError)
+    throw documentError
+  }
+
+  return document as ProjectDocument
+}
+
+async function rollbackProjectDocumentUpload(
+  client: SupabaseClient,
+  storagePath: string,
+  documentError: Error,
+) {
+  const { error } = await client.storage
+    .from(PROJECT_DOCUMENT_BUCKET)
+    .remove([storagePath])
+
+  if (error) {
+    throw new Error(
+      `Failed to rollback uploaded project document after metadata persistence error: ${error.message}`,
+      { cause: documentError },
+    )
+  }
+}
+
+export async function getProjectDocumentDownload(
+  client: SupabaseClient,
+  tenantId: string,
+  projectId: string,
+  documentId: string,
+): Promise<ProjectDocumentDownload> {
+  const { data: document, error: documentError } = await client
+    .from('documents')
+    .select('id, name, storage_bucket, storage_path')
+    .eq('id', documentId)
+    .eq('tenant_id', tenantId)
+    .eq('project_id', projectId)
+    .single()
+
+  if (documentError) throw documentError
+
+  const typedDocument = document as {
+    id: string
+    name: string
+    storage_bucket: string | null
+    storage_path: string | null
+  }
+
+  if (!typedDocument.storage_bucket || !typedDocument.storage_path) {
+    throw new Error('Document file is unavailable.')
+  }
+
+  const { data: signed, error: signError } = await client.storage
+    .from(typedDocument.storage_bucket)
+    .createSignedUrl(typedDocument.storage_path, PROJECT_DOCUMENT_SIGNED_URL_EXPIRY, {
+      download: typedDocument.name,
+    })
+
+  if (signError) throw signError
+
+  return {
+    documentId: typedDocument.id,
+    fileName: typedDocument.name,
+    signedUrl: signed.signedUrl,
   }
 }
 
@@ -1100,6 +1287,8 @@ export interface UpsertMilestoneInput {
   triggers_invoice: boolean
   /** Billing amount in cents for invoice-trigger milestones. */
   invoice_amount_cents?: number | null
+  predecessor_id?: string | null
+  lag_days?: number
 }
 
 export async function upsertMilestone(
@@ -1125,6 +1314,12 @@ export async function upsertMilestone(
         triggers_invoice:        input.triggers_invoice,
         ...(input.invoice_amount_cents !== undefined
           ? { invoice_amount_cents: input.invoice_amount_cents }
+          : {}),
+        ...(input.predecessor_id !== undefined
+          ? { predecessor_id: input.predecessor_id }
+          : {}),
+        ...(input.lag_days !== undefined
+          ? { lag_days: input.lag_days }
           : {}),
       } as unknown as never)
       .eq('id', input.id)
@@ -1152,11 +1347,77 @@ export async function upsertMilestone(
       triggers_draw_request:   input.triggers_draw_request,
       triggers_invoice:        input.triggers_invoice,
       invoice_amount_cents:    input.invoice_amount_cents ?? null,
+      predecessor_id:          input.predecessor_id ?? null,
+      lag_days:                input.lag_days ?? 0,
     } as unknown as never)
     .select('id')
     .single()
   if (error) throw error
   return data as { id: string }
+}
+
+// ── Milestone cascade ──────────────────────────────────────────────────────
+
+export interface MilestoneCascadeChange {
+  id: string
+  name: string
+  phaseName: string
+  oldDate: string | null
+  newDate: string
+}
+
+/** Adds `days` calendar days to a 'YYYY-MM-DD' string. */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Pure function — no Supabase calls.
+ * Returns every milestone that would shift when `changedId` moves to `newDueDate`,
+ * ordered by traversal depth (immediate dependents first).
+ */
+export function computeMilestoneCascade(
+  phases: ProjectPhase[],
+  changedId: string,
+  newDueDate: string,
+): MilestoneCascadeChange[] {
+  // Build lookup maps
+  const milestoneMap = new Map<string, ProjectMilestone>()
+  const phaseNameMap = new Map<string, string>()
+  for (const phase of phases) {
+    for (const m of phase.milestones) {
+      milestoneMap.set(m.id, m)
+      phaseNameMap.set(m.id, phase.name)
+    }
+  }
+
+  const changes: MilestoneCascadeChange[] = []
+  const visited = new Set<string>([changedId])
+
+  // BFS queue: [milestoneId, resolvedNewDate]
+  const queue: [string, string][] = [[changedId, newDueDate]]
+
+  while (queue.length > 0) {
+    const [predId, predNewDate] = queue.shift()!
+    for (const m of milestoneMap.values()) {
+      if (m.predecessor_id !== predId) continue
+      if (visited.has(m.id)) continue  // cycle guard
+      visited.add(m.id)
+      const newDate = addDays(predNewDate, m.lag_days)
+      changes.push({
+        id:       m.id,
+        name:     m.name,
+        phaseName: phaseNameMap.get(m.id) ?? '',
+        oldDate:  m.due_date,
+        newDate,
+      })
+      queue.push([m.id, newDate])
+    }
+  }
+
+  return changes
 }
 
 export async function deleteMilestone(
@@ -1167,6 +1428,22 @@ export async function deleteMilestone(
   const { error } = await client
     .from('milestones')
     .delete()
+    .eq('id', milestoneId)
+    .eq('tenant_id', tenantId)
+  if (error) throw error
+}
+
+/** Patches only the predecessor relationship — used by the CSV import second pass. */
+export async function setMilestonePredecessor(
+  client: SupabaseClient,
+  milestoneId: string,
+  tenantId: string,
+  predecessorId: string | null,
+  lagDays: number,
+): Promise<void> {
+  const { error } = await client
+    .from('milestones')
+    .update({ predecessor_id: predecessorId, lag_days: lagDays } as unknown as never)
     .eq('id', milestoneId)
     .eq('tenant_id', tenantId)
   if (error) throw error
